@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+message CsrfTokenTransport {
+    bytes nonce = 1;
+}
+
+message CsrfCookieTransport {
+    uint64 expires   = 1;
+    bytes  nonce     = 2;
+    bytes  signature = 3;
+}
