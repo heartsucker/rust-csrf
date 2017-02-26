@@ -17,7 +17,7 @@ name = "csrf"
 path = "./src/lib.rs"
 
 [features]
-default = []
+default = [ "iron_" ]
 iron_ = [ "iron", "hyper" ]
 
 [dependencies]
@@ -35,4 +35,3 @@ urlencoded = "^0.5"
 [dev-dependencies]
 iron-test = "^0.5"
 urlencoding = "^0.2"
-

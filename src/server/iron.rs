@@ -1,31 +1,38 @@
 //! Module containing the core functionality for CSRF protection.
 
-use std::collections::HashSet;
 use std::str;
 
 use chrono::Duration;
 use cookie::Cookie;
 use iron::headers::{SetCookie, Cookie as IronCookie};
-use iron::method;
 use iron::middleware::{AroundMiddleware, Handler};
 use iron::prelude::*;
 use iron::status;
 use iron::typemap;
-use protobuf;
-use protobuf::Message;
 use ring::hmac;
 use ring::hmac::SigningKey;
 use ring::rand::SystemRandom;
 use ring::signature;
 use ring::signature::Ed25519KeyPair;
-use rustc_serialize::base64::{ToBase64, FromBase64, STANDARD};
 use time;
 use untrusted;
 use urlencoded::{UrlEncodedQuery, UrlEncodedBody};
 
+use core::{CSRF_HEADER, CSRF_COOKIE_NAME, CSRF_FORM_FIELD, CSRF_QUERY_STRING, CsrfProtection, CsrfCookie, CsrfToken, CsrfConfig, Method};
+use error::{CsrfError};
+
 // TODO why doesn't this show up in the docs?
 /// The HTTP header for the CSRF token.
 header! { (XCsrfToken, CSRF_HEADER) => [String] }
+
+impl From<CsrfError> for IronError {
+    fn from(err: CsrfError) -> IronError {
+        IronError {
+            response: Response::with((status::Forbidden, format!("{}", err))),
+            error: Box::new(err),
+        }
+    }
+}
 
 /// Uses the Ed25519 DSA to sign and verify cookies.
 pub struct Ed25519CsrfProtection {
@@ -123,7 +130,7 @@ impl<P: CsrfProtection, H: Handler> CsrfHandler<P, H> {
     }
 
     fn validate_request(&self, mut request: &mut Request) -> IronResult<Option<Response>> {
-        if self.config.protected_methods.contains(&request.method) {
+        if self.config.protected_methods.contains(&Method::from(&request.method)) {
             let token_opt = self.extract_csrf_token(&mut request);
             let cookie_opt = self.extract_csrf_cookie(&request);
 
@@ -266,8 +273,9 @@ impl<P: CsrfProtection + Sized + 'static> AroundMiddleware for CsrfProtectionMid
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
     use hyper::header::Headers;
-    use hyper::method::Method::Extension;
+    use hyper::method::Method;
     use iron_test::request as mock_request;
     use iron_test::response::extract_body_to_string;
     use ring::digest;
@@ -352,17 +360,17 @@ mod tests {
             (extract_body_to_string(response), format!("{}", cookie))
         };
 
-        let body_methods = vec![method::Post, method::Put, method::Patch, method::Connect, Extension("WAT".to_string())];
+        let body_methods = vec![Method::Post, Method::Put, Method::Patch, Method::Connect, Method::Extension("WAT".to_string())];
 
-        let all_methods = vec![method::Get,
-                               method::Post,
-                               method::Put,
-                               method::Patch,
-                               method::Delete,
-                               method::Options,
-                               method::Connect,
-                               method::Trace,
-                               Extension("WAT".to_string())];
+        let all_methods = vec![Method::Get,
+                               Method::Post,
+                               Method::Put,
+                               Method::Patch,
+                               Method::Delete,
+                               Method::Options,
+                               Method::Connect,
+                               Method::Trace,
+                               Method::Extension("WAT".to_string())];
 
         ///////////////////////////////////////////////////////////////////////////////////
 
@@ -380,15 +388,15 @@ mod tests {
         let response = mock_request::head(path, headers.clone(), &handler).unwrap();
         assert_eq!(response.status, Some(status::Ok));
 
-        let response = mock_request::request(method::Trace, path, body, headers.clone(), &handler)
+        let response = mock_request::request(Method::Trace, path, body, headers.clone(), &handler)
             .unwrap();
         assert_eq!(response.status, Some(status::Ok));
 
         let response =
-            mock_request::request(method::Connect, path, body, headers.clone(), &handler).unwrap();
+            mock_request::request(Method::Connect, path, body, headers.clone(), &handler).unwrap();
         assert_eq!(response.status, Some(status::Ok));
 
-        let response = mock_request::request(Extension("WAT".to_string()),
+        let response = mock_request::request(Method::Extension("WAT".to_string()),
                                              path,
                                              body,
                                              headers.clone(),

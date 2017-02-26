@@ -27,9 +27,11 @@ pub const CSRF_QUERY_STRING: &'static str = "csrf-token";
 /// A decoded CSRF cookie.
 #[derive(Debug, Eq, PartialEq)]
 pub struct CsrfCookie {
-    expires: u64,
-    nonce: Vec<u8>,
-    signature: Vec<u8>,
+    // TODO make an Internal/External CsrfCookie so that consumers of this lib can break things by
+    // messing with the values
+    pub expires: u64,
+    pub nonce: Vec<u8>,
+    pub signature: Vec<u8>,
 }
 
 impl CsrfCookie {
@@ -65,8 +67,12 @@ impl CsrfCookie {
 
 /// The configuation used to initialize `CsrfProtection`.
 pub struct CsrfConfig {
-    ttl_seconds: i64,
-    protected_methods: HashSet<Method>,
+    // TODO make an Internal/External CsrfToken so that consumers of this lib can break things by
+    // messing with the values
+    pub ttl_seconds: i64,
+    pub protected_methods: HashSet<Method>,
+    // TODO make TTL optional
+    // TODO add secure flag for https cookies
 }
 
 impl CsrfConfig {
@@ -149,7 +155,9 @@ pub enum Method {
 /// ```
 #[derive(Eq, PartialEq, Debug)]
 pub struct CsrfToken {
-    nonce: Vec<u8>,
+    // TODO make an Internal/External CsrfToken so that consumers of this lib can break things by
+    // messing with the values
+    pub nonce: Vec<u8>,
 }
 
 impl CsrfToken {

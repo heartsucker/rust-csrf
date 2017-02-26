@@ -30,6 +30,7 @@
 extern crate chrono;
 extern crate cookie;
 #[cfg(feature = "iron_")]
+#[macro_use]
 extern crate hyper;
 #[cfg(feature = "iron_")]
 extern crate iron;
@@ -41,9 +42,10 @@ extern crate rustc_serialize;
 extern crate time;
 extern crate untrusted;
 extern crate urlencoded;
+#[cfg(test)]
+extern crate urlencoding;
 
 pub mod core;
 pub mod error;
-#[cfg(feature = "iron_")]
-pub mod iron;
+pub mod server;
 pub mod serial;
