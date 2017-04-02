@@ -1,0 +1,25 @@
+[package]
+name = "csrf-fuzz"
+version = "0.0.1"
+authors = ["Automatically generated"]
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies.csrf]
+path = ".."
+[dependencies.libfuzzer-sys]
+git = "https://github.com/rust-fuzz/libfuzzer-sys.git"
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "aes_gcm_parse_cookie"
+path = "fuzzers/aes_gcm_parse_cookie.rs"
+
+[[bin]]
+name = "aes_gcm_parse_token"
+path = "fuzzers/aes_gcm_parse_token.rs"
