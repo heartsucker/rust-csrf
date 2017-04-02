@@ -48,13 +48,7 @@ impl fmt::Display for CsrfError {
     }
 }
 
-pub enum CsrfConfigError {
-    // TODO add more of these
-    InvalidTtl,
-    NoProtectedMethods,
-    Unspecified,
-}
-
+/// A signed, encrypted CSRF token that is suitable to be displayed to end users.
 #[derive(Eq, PartialEq, Debug)]
 pub struct CsrfToken {
     bytes: Vec<u8>,
@@ -77,7 +71,7 @@ impl CsrfToken {
     }
 }
 
-/// An encoded CSRF cookie.
+/// A signed, encrypted CSRF cookie that is suitable to be displayed to end users.
 #[derive(Debug, Eq, PartialEq)]
 pub struct CsrfCookie {
     bytes: Vec<u8>,
@@ -93,7 +87,7 @@ impl CsrfCookie {
     }
 }
 
-/// Internal represenation of unencrypted data.
+/// Internal represenation of an unencrypted CSRF token. This is not suitable to send to end users.
 #[derive(Clone, Debug)]
 pub struct UnencryptedCsrfToken {
     token: Vec<u8>,
@@ -109,7 +103,7 @@ impl UnencryptedCsrfToken {
     }
 }
 
-/// Internal represenation of unencrypted data.
+/// Internal represenation of an unencrypted CSRF cookie. This is not suitable to send to end users.
 #[derive(Clone, Debug)]
 pub struct UnencryptedCsrfCookie {
     expires: i64,
@@ -125,6 +119,7 @@ impl UnencryptedCsrfCookie {
     }
 }
 
+/// The base trait that allows a developer to add CSRF protection to an application.
 pub trait CsrfProtection: Send + Sync {
     /// Use a key derivation function (KDF) to generate key material.
     ///
@@ -132,21 +127,29 @@ pub trait CsrfProtection: Send + Sync {
     /// This function may panic if the underlying crypto library fails catastrophically.
     fn from_password(password: &[u8]) -> Self;
 
+    /// Given a token pair that has been parsed, decoded, decrypted, and verified, return whether
+    /// or not the token matches the cookie and they have not expired.
     fn verify_token_pair(&self,
                          token: &UnencryptedCsrfToken,
                          cookie: &UnencryptedCsrfCookie)
                          -> bool;
 
-    fn generate_cookie(&self, token: &[u8], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError>;
+    /// Given a nonce and a time to live (TTL), create a cookie to send to the end user.
+    fn generate_cookie(&self, nonce: &[u8], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError>;
 
-    fn generate_token(&self, token: &[u8]) -> Result<CsrfToken, CsrfError>;
+    /// Given a nonce, create a token to send to the end user.
+    fn generate_token(&self, nonce: &[u8]) -> Result<CsrfToken, CsrfError>;
 
+    /// Given a decoded byte array, deserialize, decrypt, and verify the cookie.
     fn parse_cookie(&self, cookie: &[u8]) -> Result<UnencryptedCsrfCookie, CsrfError>;
 
+    /// Given a decoded byte array, deserialize, decrypt, and verify the token.
     fn parse_token(&self, token: &[u8]) -> Result<UnencryptedCsrfToken, CsrfError>;
 
+    /// Provide a random number generator for other functions.
     fn rng(&self) -> &SystemRandom;
 
+    /// Given a buffer, fill it with random bytes or error if this is not possible.
     fn random_bytes(&self, buf: &mut [u8]) -> Result<(), CsrfError> {
         self.rng()
             .fill(buf)
@@ -156,6 +159,8 @@ pub trait CsrfProtection: Send + Sync {
             })
     }
 
+    // TODO stop using token to describe the "nonce" and the token itself
+    /// Given an optional previous token and a TTL, generate a matching token and cookie pair.
     fn generate_token_pair(&self,
                            previous_token: Option<Vec<u8>>,
                            ttl_seconds: i64)
@@ -184,6 +189,7 @@ pub struct AesGcmCsrfProtection {
 }
 
 impl AesGcmCsrfProtection {
+    /// Given an AES256 key, return an `AesGcmCsrfProtection` instance.
     pub fn from_key(aes_key: [u8; 32]) -> Self {
         AesGcmCsrfProtection {
             rng: SystemRandom::new(),
