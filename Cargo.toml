@@ -1,8 +1,8 @@
 [package]
 name = "csrf"
-version = "0.0.1"
+version = "0.1.0"
 authors = [ "heartsucker <heartsucker@autistici.org>" ]
-description = "CSRF protection for Rust web frameworks"
+description = "CSRF protection primitives"
 homepage = "https://github.com/heartsucker/rust-csrf"
 repository = "https://github.com/heartsucker/rust-csrf"
 documentation = "https://docs.rs/csrf"
@@ -10,28 +10,21 @@ readme = "README.md"
 license = "MIT"
 keywords = [ "csrf", "web", "security", "http" ]
 categories = [ "web-programming::http-server", "authentication", "cryptography" ]
-travis-ci = { repository = "https://github.com/heartsucker/rust-csrf", branch = "master" }
+
+[badges]
+travis-ci = { repository = "https://github.com/heartsucker/rust-csrf", branch = "develop" }
 
 [lib]
 name = "csrf"
 path = "./src/lib.rs"
 
 [features]
-default = [ "iron_" ]
-iron_ = [ "iron", "hyper" ]
+iron = [ "typemap" ]
 
 [dependencies]
-chrono = "^0.3"
-cookie = { version = "^0.6", features = [ "percent-encode" ] }
-hyper = { version = "^0.10", optional = true }
-iron = { version = "^0.5", optional = true }
-protobuf = "^1.2"
-ring = "^0.7"
-rustc-serialize = "^0.3"
-time = "^0.1"
-untrusted = "^0.3"
-urlencoded = "^0.5"
-
-[dev-dependencies]
-iron-test = "^0.5"
-urlencoding = "^0.2"
+log = "0.3"
+ring = "0.7"
+rust-crypto = "0.2"
+rustc-serialize = "0.3"
+time = "0.1"
+typemap = { version = "0.3", optional = true }

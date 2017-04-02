@@ -1,16 +1,8 @@
 # rust-csrf
 
-Primitives for CSRF protection.
-
-`rust-csrf` uses Ed25519 DSA or HMAC to sign and verify timestamped CSRF cookies
-and their accompanying tokens.
+Primitives for building CSRF protection.
 
 Documentation is hosted at [docs.rs](https://docs.rs/rust-csrf/).
-
-## Beta Software
-
-This code is not at this time suitable for any production deployment. It has not been
-verified and the API is somewhat unstable. Use with caution.
 
 ## Contributing
 
