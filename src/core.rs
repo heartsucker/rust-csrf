@@ -483,38 +483,78 @@ mod tests {
         assert!(protect.parse_token(&token).is_err());
     }
 
+    fn mismatched_cookie_token_fail<P: CsrfProtection>(protect: P) {
+        let (token, _) = protect.generate_token_pair(None, 300)
+            .expect("couldn't generate token/token pair");
+        let (_, cookie) = protect.generate_token_pair(None, 300)
+            .expect("couldn't generate token/token pair");
+
+        let token = token.b64_string().from_base64().expect("token not base64");
+        let token = protect.parse_token(&token).expect("token not parsed");
+        let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
+        let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
+        assert!(!protect.verify_token_pair(&token, &cookie),
+                "verified token/cookie pair when failure expected");
+    }
+
+    fn expired_token_fail<P: CsrfProtection>(protect: P) {
+        let (token, cookie) = protect.generate_token_pair(None, -1)
+            .expect("couldn't generate token/cookie pair");
+        let token = token.b64_string().from_base64().expect("token not base64");
+        let token = protect.parse_token(&token).expect("token not parsed");
+        let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
+        let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
+        assert!(!protect.verify_token_pair(&token, &cookie),
+                "verified token/cookie pair when failure expected");
+    }
+
+    // TODO test that checks tokens are repeated when given Some
+
+    #[test]
+    fn aes_gcm_from_password() {
+        let password = b"correct horse battery staple";
+        let _ = AesGcmCsrfProtection::from_password(password);
+    }
+
     #[test]
     fn aes_gcm_verification_succeeds() {
-        let password = b"hunter2";
-        let protect = AesGcmCsrfProtection::from_password(password);
+        let protect = AesGcmCsrfProtection::from_key(*b"01234567012345670123456701234567");
         verification_succeeds(protect);
     }
 
     #[test]
     fn aes_gcm_modified_cookie_sig_fails() {
-        let password = b"hunter2";
-        let protect = AesGcmCsrfProtection::from_password(password);
+        let protect = AesGcmCsrfProtection::from_key(*b"01234567012345670123456701234567");
         modified_cookie_sig_fails(protect);
     }
 
     #[test]
     fn aes_gcm_modified_cookie_value_fails() {
-        let password = b"hunter2";
-        let protect = AesGcmCsrfProtection::from_password(password);
+        let protect = AesGcmCsrfProtection::from_key(*b"01234567012345670123456701234567");
         modified_cookie_value_fails(protect);
     }
 
     #[test]
     fn aes_gcm_modified_token_sig_fails() {
-        let password = b"hunter2";
-        let protect = AesGcmCsrfProtection::from_password(password);
+        let protect = AesGcmCsrfProtection::from_key(*b"01234567012345670123456701234567");
         modified_token_sig_fails(protect);
     }
 
     #[test]
     fn aes_gcm_modified_token_value_fails() {
-        let password = b"hunter2";
-        let protect = AesGcmCsrfProtection::from_password(password);
+        let protect = AesGcmCsrfProtection::from_key(*b"01234567012345670123456701234567");
         modified_token_value_fails(protect);
+    }
+
+    #[test]
+    fn aes_gcm_mismatched_cookie_token_fail() {
+        let protect = AesGcmCsrfProtection::from_key(*b"01234567012345670123456701234567");
+        mismatched_cookie_token_fail(protect);
+    }
+
+    #[test]
+    fn aes_gcm_expired_token_fail() {
+        let protect = AesGcmCsrfProtection::from_key(*b"01234567012345670123456701234567");
+        expired_token_fail(protect)
     }
 }

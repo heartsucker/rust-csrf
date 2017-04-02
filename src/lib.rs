@@ -17,7 +17,7 @@
 //! use rustc_serialize::base64::FromBase64;
 //!
 //! fn main() {
-//!     let protect = AesGcmCsrfProtection::from_password(b"correct horse battery staple");
+//!     let protect = AesGcmCsrfProtection::from_key(*b"01234567012345670123456701234567");
 //!
 //!     let (token, cookie) = protect.generate_token_pair(None, 300)
 //!         .expect("couldn't generate token/cookie pair");
