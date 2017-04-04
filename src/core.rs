@@ -140,10 +140,10 @@ pub trait CsrfProtection: Send + Sync {
     fn from_password(password: &[u8]) -> Self;
 
     /// Given a nonce and a time to live (TTL), create a cookie to send to the end user.
-    fn generate_cookie(&self, nonce: &[u8], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError>;
+    fn generate_cookie(&self, token_value: &[u8; 64], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError>;
 
     /// Given a nonce, create a token to send to the end user.
-    fn generate_token(&self, nonce: &[u8]) -> Result<CsrfToken, CsrfError>;
+    fn generate_token(&self, token_value: &[u8; 64]) -> Result<CsrfToken, CsrfError>;
 
     /// Given a decoded byte array, deserialize, decrypt, and verify the cookie.
     fn parse_cookie(&self, cookie: &[u8]) -> Result<UnencryptedCsrfCookie, CsrfError>;
@@ -175,19 +175,19 @@ pub trait CsrfProtection: Send + Sync {
             })
     }
 
-    // TODO stop using token to describe the "nonce" and the token itself
     /// Given an optional previous token and a TTL, generate a matching token and cookie pair.
     fn generate_token_pair(&self,
-                           previous_token: Option<Vec<u8>>,
+                           previous_token_value: Option<&[u8; 64]>,
                            ttl_seconds: i64)
                            -> Result<(CsrfToken, CsrfCookie), CsrfError> {
-        let mut token = vec![0; 64];
-        match previous_token {
+        let mut token = [0; 64];
+        match previous_token_value {
             Some(ref previous) if previous.len() == 64 => {
                 for i in 0..64 {
                     token[i] = previous[i];
                 }
-            }
+            },
+            // blindly ignore all to
             _ => self.random_bytes(&mut token)?,
         }
 
@@ -214,7 +214,7 @@ impl HmacCsrfProtection {
         }
     }
 
-    pub fn hmac(&self) -> Hmac<Sha256> {
+    fn hmac(&self) -> Hmac<Sha256> {
         Hmac::new(Sha256::new(), &self.hmac_key)
     }
 }
@@ -245,16 +245,12 @@ impl CsrfProtection for HmacCsrfProtection {
         &self.rng
     }
 
-    fn generate_cookie(&self, token: &[u8], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError> {
-        if token.len() != 64 {
-            return Err(CsrfError::InternalError);
-        }
-
+    fn generate_cookie(&self, token_value: &[u8; 64], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError> {
         let expires = time::precise_time_s() as i64 + ttl_seconds;
         let expires_bytes = unsafe { mem::transmute::<i64, [u8; 8]>(expires) };
 
         let mut hmac = self.hmac();
-        hmac.input(&token);
+        hmac.input(token_value);
         hmac.input(&expires_bytes);
         let mac = hmac.result();
         let code = mac.code();
@@ -262,7 +258,7 @@ impl CsrfProtection for HmacCsrfProtection {
         let mut transport = [0; 104];
 
         for i in 0..64 {
-            transport[i] = token[i];
+            transport[i] = token_value[i];
         }
         for i in 0..8 {
             transport[i + 64] = expires_bytes[i];
@@ -274,20 +270,16 @@ impl CsrfProtection for HmacCsrfProtection {
         Ok(CsrfCookie::new(transport.to_vec()))
     }
 
-    fn generate_token(&self, token: &[u8]) -> Result<CsrfToken, CsrfError> {
-        if token.len() != 64 {
-            return Err(CsrfError::InternalError);
-        }
-
+    fn generate_token(&self, token_value: &[u8; 64]) -> Result<CsrfToken, CsrfError> {
         let mut hmac = self.hmac();
-        hmac.input(&token);
+        hmac.input(token_value);
         let mac = hmac.result();
         let code = mac.code();
 
         let mut transport = [0; 96];
 
         for i in 0..64 {
-            transport[i] = token[i];
+            transport[i] = token_value[i];
         }
         for i in 0..32 {
             transport[i + 64] = code[i];
@@ -407,11 +399,7 @@ impl CsrfProtection for AesGcmCsrfProtection {
         &self.rng
     }
 
-    fn generate_cookie(&self, token: &[u8], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError> {
-        if token.len() != 64 {
-            return Err(CsrfError::InternalError);
-        }
-
+    fn generate_cookie(&self, token_value: &[u8; 64], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError> {
         let expires = time::precise_time_s() as i64 + ttl_seconds;
         let expires_bytes = unsafe { mem::transmute::<i64, [u8; 8]>(expires) };
 
@@ -430,7 +418,7 @@ impl CsrfProtection for AesGcmCsrfProtection {
             plaintext[i + 16] = expires_bytes[i];
         }
         for i in 0..64 {
-            plaintext[i + 24] = token[i];
+            plaintext[i + 24] = token_value[i];
         }
 
         let mut ciphertext = [0; 88];
@@ -454,11 +442,7 @@ impl CsrfProtection for AesGcmCsrfProtection {
         Ok(CsrfCookie::new(transport.to_vec()))
     }
 
-    fn generate_token(&self, token: &[u8]) -> Result<CsrfToken, CsrfError> {
-        if token.len() != 64 {
-            return Err(CsrfError::InternalError);
-        }
-
+    fn generate_token(&self, token_value: &[u8; 64]) -> Result<CsrfToken, CsrfError> {
         let mut nonce = [0; 12];
         self.random_bytes(&mut nonce)?;
 
@@ -471,7 +455,7 @@ impl CsrfProtection for AesGcmCsrfProtection {
             plaintext[i] = padding[i];
         }
         for i in 0..64 {
-            plaintext[i + 16] = token[i];
+            plaintext[i + 16] = token_value[i];
         }
 
         let mut ciphertext = [0; 80];
@@ -620,11 +604,7 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
         &self.rng
     }
 
-    fn generate_cookie(&self, token: &[u8], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError> {
-        if token.len() != 64 {
-            return Err(CsrfError::InternalError);
-        }
-
+    fn generate_cookie(&self, token_value: &[u8; 64], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError> {
         let expires = time::precise_time_s() as i64 + ttl_seconds;
         let expires_bytes = unsafe { mem::transmute::<i64, [u8; 8]>(expires) };
 
@@ -643,7 +623,7 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
             plaintext[i + 16] = expires_bytes[i];
         }
         for i in 0..64 {
-            plaintext[i + 24] = token[i];
+            plaintext[i + 24] = token_value[i];
         }
 
         let mut ciphertext = [0; 88];
@@ -667,11 +647,7 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
         Ok(CsrfCookie::new(transport.to_vec()))
     }
 
-    fn generate_token(&self, token: &[u8]) -> Result<CsrfToken, CsrfError> {
-        if token.len() != 64 {
-            return Err(CsrfError::InternalError);
-        }
-
+    fn generate_token(&self, token_value: &[u8; 64]) -> Result<CsrfToken, CsrfError> {
         let mut nonce = [0; 8];
         self.random_bytes(&mut nonce)?;
 
@@ -684,7 +660,7 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
             plaintext[i] = padding[i];
         }
         for i in 0..64 {
-            plaintext[i + 16] = token[i];
+            plaintext[i + 16] = token_value[i];
         }
 
         let mut ciphertext = [0; 80];
