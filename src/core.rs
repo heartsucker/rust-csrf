@@ -34,7 +34,7 @@ const SCRYPT_SALT: &'static [u8; 21] = b"rust-csrf-scrypt-salt";
 
 
 /// An `enum` of all CSRF related errors.
-#[derive(Debug)]
+#[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub enum CsrfError {
     InternalError,
     ValidationFailure,
@@ -57,7 +57,7 @@ impl fmt::Display for CsrfError {
 
 
 /// A signed, encrypted CSRF token that is suitable to be displayed to end users.
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug, Clone, Hash)]
 pub struct CsrfToken {
     bytes: Vec<u8>,
 }
@@ -81,7 +81,7 @@ impl CsrfToken {
 
 
 /// A signed, encrypted CSRF cookie that is suitable to be displayed to end users.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct CsrfCookie {
     bytes: Vec<u8>,
 }
@@ -99,7 +99,7 @@ impl CsrfCookie {
 
 
 /// Internal represenation of an unencrypted CSRF token. This is not suitable to send to end users.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct UnencryptedCsrfToken {
     token: Vec<u8>,
 }
@@ -116,7 +116,7 @@ impl UnencryptedCsrfToken {
 
 
 /// Internal represenation of an unencrypted CSRF cookie. This is not suitable to send to end users.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct UnencryptedCsrfCookie {
     expires: i64,
     token: Vec<u8>,
@@ -218,7 +218,6 @@ impl HmacCsrfProtection {
         Hmac::new(Sha256::new(), &self.hmac_key)
     }
 }
-
 
 impl CsrfProtection for HmacCsrfProtection {
     /// Using `scrypt` with params `n=12`, `r=8`, `p=1`, generate the key material used for the
