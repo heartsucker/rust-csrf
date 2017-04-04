@@ -623,7 +623,6 @@ mod tests {
                 "could not verify token/cookie pair");
     }
 
-
     fn modified_cookie_sig_fails<P: CsrfProtection>(protect: P) {
         let (_, mut cookie) = protect.generate_token_pair(None, 300)
             .expect("couldn't generate token/cookie pair");
@@ -685,10 +684,11 @@ mod tests {
 
     // TODO test that checks tokens are repeated when given Some
 
+    // TODO use macros for writing all of these
+
     #[test]
     fn aesgcm_from_password() {
-        let password = b"correct horse battery staple";
-        let _ = AesGcmCsrfProtection::from_password(password);
+        let _ = AesGcmCsrfProtection::from_password(b"correct horse battery staple");
     }
 
     #[test]
@@ -735,8 +735,7 @@ mod tests {
 
     #[test]
     fn chacha20poly1305_from_password() {
-        let password = b"correct horse battery staple";
-        let _ = ChaCha20Poly1305CsrfProtection::from_password(password);
+        let _ = ChaCha20Poly1305CsrfProtection::from_password(b"correct horse battery staple");
     }
 
     #[test]
