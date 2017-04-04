@@ -2,7 +2,7 @@
 
 Primitives for building CSRF protection.
 
-Documentation is hosted at [docs.rs](https://docs.rs/rust-csrf/).
+Documentation is hosted at [docs.rs](https://docs.rs/csrf/).
 
 ## Contributing
 
