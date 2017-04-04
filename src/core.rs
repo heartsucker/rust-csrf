@@ -612,19 +612,19 @@ mod tests {
     // TODO use macros for writing all of these
 
     macro_rules! test_cases {
-        ($struct: ident, $mod: ident) => {
-            mod $mod {
-                use $crate::core::{CsrfProtection, $struct};
+        ($strct: ident, $md: ident) => {
+            mod $md {
+                use $crate::core::{CsrfProtection, $strct};
                 use rustc_serialize::base64::FromBase64;
 
                 #[test]
                 fn from_password() {
-                    let _ = $struct::from_password(b"correct horse battery staple");
+                    let _ = $strct::from_password(b"correct horse battery staple");
                 }
 
                 #[test]
                 fn verification_succeeds() {
-                    let protect = $struct::from_key(*b"01234567012345670123456701234567");
+                    let protect = $strct::from_key(*b"01234567012345670123456701234567");
                     let (token, cookie) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/cookie pair");
                     let token = token.b64_string().from_base64().expect("token not base64");
@@ -637,7 +637,7 @@ mod tests {
 
                 #[test]
                 fn modified_cookie_sig_fails() {
-                    let protect = $struct::from_key(*b"01234567012345670123456701234567");
+                    let protect = $strct::from_key(*b"01234567012345670123456701234567");
                     let (_, mut cookie) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/cookie pair");
                     let cookie_len = cookie.bytes.len();
@@ -648,7 +648,7 @@ mod tests {
 
                 #[test]
                 fn modified_cookie_value_fails() {
-                    let protect = $struct::from_key(*b"01234567012345670123456701234567");
+                    let protect = $strct::from_key(*b"01234567012345670123456701234567");
                     let (_, mut cookie) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/cookie pair");
                     cookie.bytes[0] ^= 0x01;
@@ -658,7 +658,7 @@ mod tests {
 
                 #[test]
                 fn modified_token_sig_fails() {
-                    let protect = $struct::from_key(*b"01234567012345670123456701234567");
+                    let protect = $strct::from_key(*b"01234567012345670123456701234567");
                     let (mut token, _) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/token pair");
                     let token_len = token.bytes.len();
@@ -669,7 +669,7 @@ mod tests {
 
                 #[test]
                 fn modified_token_value_fails() {
-                    let protect = $struct::from_key(*b"01234567012345670123456701234567");
+                    let protect = $strct::from_key(*b"01234567012345670123456701234567");
                     let (mut token, _) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/token pair");
                     token.bytes[0] ^= 0x01;
@@ -679,7 +679,7 @@ mod tests {
 
                 #[test]
                 fn mismatched_cookie_token_fail() {
-                    let protect = $struct::from_key(*b"01234567012345670123456701234567");
+                    let protect = $strct::from_key(*b"01234567012345670123456701234567");
                     let (token, _) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/token pair");
                     let (_, cookie) = protect.generate_token_pair(None, 300)
@@ -695,7 +695,7 @@ mod tests {
 
                 #[test]
                 fn expired_token_fail() {
-                    let protect = $struct::from_key(*b"01234567012345670123456701234567");
+                    let protect = $strct::from_key(*b"01234567012345670123456701234567");
                     let (token, cookie) = protect.generate_token_pair(None, -1)
                         .expect("couldn't generate token/cookie pair");
                     let token = token.b64_string().from_base64().expect("token not base64");

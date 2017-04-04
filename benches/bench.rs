@@ -5,14 +5,14 @@ extern crate csrf;
 extern crate test;
 
 macro_rules! benchmark {
-    ($struct: ident, $mod: ident) => {
-        mod $mod {
-            use csrf::{CsrfProtection, $struct};
+    ($strct: ident, $md: ident) => {
+        mod $md {
+            use csrf::{CsrfProtection, $strct};
             use test::Bencher;
 
             #[bench]
             fn generate_pair(b: &mut Bencher) {
-                let protect = $struct::from_key(*b"01234567012345670123456701234567");
+                let protect = $strct::from_key(*b"01234567012345670123456701234567");
                 b.iter(|| {
                     let _ = protect.generate_token_pair(None, 3600);
                 });

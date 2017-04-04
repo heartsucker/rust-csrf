@@ -6,4 +6,4 @@ help: ## Print this message and exit
 
 travis: ## Run the TravisCI tests
 	@cargo test && \
-			cargo bench
+			if rustc --version | greq -q nightly; then cargo bench; fi
