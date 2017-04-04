@@ -607,183 +607,108 @@ impl typemap::Key for CsrfToken {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use rustc_serialize::base64::FromBase64;
-
     // TODO write test that ensures encrypted messages don't contain the plaintext
-
-    fn verification_succeeds<P: CsrfProtection>(protect: P) {
-        let (token, cookie) = protect.generate_token_pair(None, 300)
-            .expect("couldn't generate token/cookie pair");
-        let token = token.b64_string().from_base64().expect("token not base64");
-        let token = protect.parse_token(&token).expect("token not parsed");
-        let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
-        let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
-        assert!(protect.verify_token_pair(&token, &cookie),
-                "could not verify token/cookie pair");
-    }
-
-    fn modified_cookie_sig_fails<P: CsrfProtection>(protect: P) {
-        let (_, mut cookie) = protect.generate_token_pair(None, 300)
-            .expect("couldn't generate token/cookie pair");
-        let cookie_len = cookie.bytes.len();
-        cookie.bytes[cookie_len - 1] ^= 0x01;
-        let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
-        assert!(protect.parse_cookie(&cookie).is_err());
-    }
-
-    fn modified_cookie_value_fails<P: CsrfProtection>(protect: P) {
-        let (_, mut cookie) = protect.generate_token_pair(None, 300)
-            .expect("couldn't generate token/cookie pair");
-        cookie.bytes[0] ^= 0x01;
-        let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
-        assert!(protect.parse_cookie(&cookie).is_err());
-    }
-
-    fn modified_token_sig_fails<P: CsrfProtection>(protect: P) {
-        let (mut token, _) = protect.generate_token_pair(None, 300)
-            .expect("couldn't generate token/token pair");
-        let token_len = token.bytes.len();
-        token.bytes[token_len - 1] ^= 0x01;
-        let token = token.b64_string().from_base64().expect("token not base64");
-        assert!(protect.parse_token(&token).is_err());
-    }
-
-    fn modified_token_value_fails<P: CsrfProtection>(protect: P) {
-        let (mut token, _) = protect.generate_token_pair(None, 300)
-            .expect("couldn't generate token/token pair");
-        token.bytes[0] ^= 0x01;
-        let token = token.b64_string().from_base64().expect("token not base64");
-        assert!(protect.parse_token(&token).is_err());
-    }
-
-    fn mismatched_cookie_token_fail<P: CsrfProtection>(protect: P) {
-        let (token, _) = protect.generate_token_pair(None, 300)
-            .expect("couldn't generate token/token pair");
-        let (_, cookie) = protect.generate_token_pair(None, 300)
-            .expect("couldn't generate token/token pair");
-
-        let token = token.b64_string().from_base64().expect("token not base64");
-        let token = protect.parse_token(&token).expect("token not parsed");
-        let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
-        let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
-        assert!(!protect.verify_token_pair(&token, &cookie),
-                "verified token/cookie pair when failure expected");
-    }
-
-    fn expired_token_fail<P: CsrfProtection>(protect: P) {
-        let (token, cookie) = protect.generate_token_pair(None, -1)
-            .expect("couldn't generate token/cookie pair");
-        let token = token.b64_string().from_base64().expect("token not base64");
-        let token = protect.parse_token(&token).expect("token not parsed");
-        let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
-        let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
-        assert!(!protect.verify_token_pair(&token, &cookie),
-                "verified token/cookie pair when failure expected");
-    }
-
     // TODO test that checks tokens are repeated when given Some
-
     // TODO use macros for writing all of these
 
-    #[test]
-    fn aesgcm_from_password() {
-        let _ = AesGcmCsrfProtection::from_password(b"correct horse battery staple");
+    macro_rules! test_cases {
+        ($struct: ident, $mod: ident) => {
+            mod $mod {
+                use $crate::core::{CsrfProtection, $struct};
+                use rustc_serialize::base64::FromBase64;
+
+                #[test]
+                fn from_password() {
+                    let _ = $struct::from_password(b"correct horse battery staple");
+                }
+
+                #[test]
+                fn verification_succeeds() {
+                    let protect = $struct::from_key(*b"01234567012345670123456701234567");
+                    let (token, cookie) = protect.generate_token_pair(None, 300)
+                        .expect("couldn't generate token/cookie pair");
+                    let token = token.b64_string().from_base64().expect("token not base64");
+                    let token = protect.parse_token(&token).expect("token not parsed");
+                    let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
+                    let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
+                    assert!(protect.verify_token_pair(&token, &cookie),
+                            "could not verify token/cookie pair");
+                }
+
+                #[test]
+                fn modified_cookie_sig_fails() {
+                    let protect = $struct::from_key(*b"01234567012345670123456701234567");
+                    let (_, mut cookie) = protect.generate_token_pair(None, 300)
+                        .expect("couldn't generate token/cookie pair");
+                    let cookie_len = cookie.bytes.len();
+                    cookie.bytes[cookie_len - 1] ^= 0x01;
+                    let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
+                    assert!(protect.parse_cookie(&cookie).is_err());
+                }
+
+                #[test]
+                fn modified_cookie_value_fails() {
+                    let protect = $struct::from_key(*b"01234567012345670123456701234567");
+                    let (_, mut cookie) = protect.generate_token_pair(None, 300)
+                        .expect("couldn't generate token/cookie pair");
+                    cookie.bytes[0] ^= 0x01;
+                    let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
+                    assert!(protect.parse_cookie(&cookie).is_err());
+                }
+
+                #[test]
+                fn modified_token_sig_fails() {
+                    let protect = $struct::from_key(*b"01234567012345670123456701234567");
+                    let (mut token, _) = protect.generate_token_pair(None, 300)
+                        .expect("couldn't generate token/token pair");
+                    let token_len = token.bytes.len();
+                    token.bytes[token_len - 1] ^= 0x01;
+                    let token = token.b64_string().from_base64().expect("token not base64");
+                    assert!(protect.parse_token(&token).is_err());
+                }
+
+                #[test]
+                fn modified_token_value_fails() {
+                    let protect = $struct::from_key(*b"01234567012345670123456701234567");
+                    let (mut token, _) = protect.generate_token_pair(None, 300)
+                        .expect("couldn't generate token/token pair");
+                    token.bytes[0] ^= 0x01;
+                    let token = token.b64_string().from_base64().expect("token not base64");
+                    assert!(protect.parse_token(&token).is_err());
+                }
+
+                #[test]
+                fn mismatched_cookie_token_fail() {
+                    let protect = $struct::from_key(*b"01234567012345670123456701234567");
+                    let (token, _) = protect.generate_token_pair(None, 300)
+                        .expect("couldn't generate token/token pair");
+                    let (_, cookie) = protect.generate_token_pair(None, 300)
+                        .expect("couldn't generate token/token pair");
+
+                    let token = token.b64_string().from_base64().expect("token not base64");
+                    let token = protect.parse_token(&token).expect("token not parsed");
+                    let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
+                    let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
+                    assert!(!protect.verify_token_pair(&token, &cookie),
+                            "verified token/cookie pair when failure expected");
+                }
+
+                #[test]
+                fn expired_token_fail() {
+                    let protect = $struct::from_key(*b"01234567012345670123456701234567");
+                    let (token, cookie) = protect.generate_token_pair(None, -1)
+                        .expect("couldn't generate token/cookie pair");
+                    let token = token.b64_string().from_base64().expect("token not base64");
+                    let token = protect.parse_token(&token).expect("token not parsed");
+                    let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
+                    let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
+                    assert!(!protect.verify_token_pair(&token, &cookie),
+                            "verified token/cookie pair when failure expected");
+                }
+            }
+        }
     }
 
-    #[test]
-    fn aesgcm_verification_succeeds() {
-        let protect = AesGcmCsrfProtection::from_key(*b"01234567012345670123456701234567");
-        verification_succeeds(protect);
-    }
-
-    #[test]
-    fn aesgcm_modified_cookie_sig_fails() {
-        let protect = AesGcmCsrfProtection::from_key(*b"01234567012345670123456701234567");
-        modified_cookie_sig_fails(protect);
-    }
-
-    #[test]
-    fn aesgcm_modified_cookie_value_fails() {
-        let protect = AesGcmCsrfProtection::from_key(*b"01234567012345670123456701234567");
-        modified_cookie_value_fails(protect);
-    }
-
-    #[test]
-    fn aesgcm_modified_token_sig_fails() {
-        let protect = AesGcmCsrfProtection::from_key(*b"01234567012345670123456701234567");
-        modified_token_sig_fails(protect);
-    }
-
-    #[test]
-    fn aesgcm_modified_token_value_fails() {
-        let protect = AesGcmCsrfProtection::from_key(*b"01234567012345670123456701234567");
-        modified_token_value_fails(protect);
-    }
-
-    #[test]
-    fn aesgcm_mismatched_cookie_token_fail() {
-        let protect = AesGcmCsrfProtection::from_key(*b"01234567012345670123456701234567");
-        mismatched_cookie_token_fail(protect);
-    }
-
-    #[test]
-    fn aesgcm_expired_token_fail() {
-        let protect = AesGcmCsrfProtection::from_key(*b"01234567012345670123456701234567");
-        expired_token_fail(protect)
-    }
-
-    #[test]
-    fn chacha20poly1305_from_password() {
-        let _ = ChaCha20Poly1305CsrfProtection::from_password(b"correct horse battery staple");
-    }
-
-    #[test]
-    fn chacha20poly1305_verification_succeeds() {
-        let protect =
-            ChaCha20Poly1305CsrfProtection::from_key(*b"01234567012345670123456701234567");
-        verification_succeeds(protect);
-    }
-
-    #[test]
-    fn chacha20poly1305_modified_cookie_sig_fails() {
-        let protect =
-            ChaCha20Poly1305CsrfProtection::from_key(*b"01234567012345670123456701234567");
-        modified_cookie_sig_fails(protect);
-    }
-
-    #[test]
-    fn chacha20poly1305_modified_cookie_value_fails() {
-        let protect =
-            ChaCha20Poly1305CsrfProtection::from_key(*b"01234567012345670123456701234567");
-        modified_cookie_value_fails(protect);
-    }
-
-    #[test]
-    fn chacha20poly1305_modified_token_sig_fails() {
-        let protect =
-            ChaCha20Poly1305CsrfProtection::from_key(*b"01234567012345670123456701234567");
-        modified_token_sig_fails(protect);
-    }
-
-    #[test]
-    fn chacha20poly1305_modified_token_value_fails() {
-        let protect =
-            ChaCha20Poly1305CsrfProtection::from_key(*b"01234567012345670123456701234567");
-        modified_token_value_fails(protect);
-    }
-
-    #[test]
-    fn chacha20poly1305_mismatched_cookie_token_fail() {
-        let protect =
-            ChaCha20Poly1305CsrfProtection::from_key(*b"01234567012345670123456701234567");
-        mismatched_cookie_token_fail(protect);
-    }
-
-    #[test]
-    fn chacha20poly1305_expired_token_fail() {
-        let protect =
-            ChaCha20Poly1305CsrfProtection::from_key(*b"01234567012345670123456701234567");
-        expired_token_fail(protect)
-    }
+    test_cases!(AesGcmCsrfProtection, aesgcm);
+    test_cases!(ChaCha20Poly1305CsrfProtection, chacha20poly1305);
 }
