@@ -64,7 +64,7 @@ pub struct CsrfToken {
 
 impl CsrfToken {
     pub fn new(bytes: Vec<u8>) -> Self {
-        // TODO make this returna  Result and check that bytes is long enough
+        // TODO make this return a Result and check that bytes is long enough
         CsrfToken { bytes: bytes }
     }
 
@@ -88,6 +88,7 @@ pub struct CsrfCookie {
 
 impl CsrfCookie {
     pub fn new(bytes: Vec<u8>) -> Self {
+        // TODO make this return a Result and check that bytes is long enough
         CsrfCookie { bytes: bytes }
     }
 
@@ -246,7 +247,9 @@ impl CsrfProtection for HmacCsrfProtection {
     }
 
     fn generate_cookie(&self, token: &[u8], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError> {
-        // TODO check that token.len() == 64
+        if token.len() != 64 {
+            return Err(CsrfError::InternalError);
+        }
 
         let expires = time::precise_time_s() as i64 + ttl_seconds;
         let expires_bytes = unsafe { mem::transmute::<i64, [u8; 8]>(expires) };
@@ -273,7 +276,9 @@ impl CsrfProtection for HmacCsrfProtection {
     }
 
     fn generate_token(&self, token: &[u8]) -> Result<CsrfToken, CsrfError> {
-        // TODO check that token.len() == 64
+        if token.len() != 64 {
+            return Err(CsrfError::InternalError);
+        }
 
         let mut hmac = self.hmac();
         hmac.input(&token);
@@ -404,7 +409,9 @@ impl CsrfProtection for AesGcmCsrfProtection {
     }
 
     fn generate_cookie(&self, token: &[u8], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError> {
-        // TODO check that token.len() == 64
+        if token.len() != 64 {
+            return Err(CsrfError::InternalError);
+        }
 
         let expires = time::precise_time_s() as i64 + ttl_seconds;
         let expires_bytes = unsafe { mem::transmute::<i64, [u8; 8]>(expires) };
@@ -449,7 +456,9 @@ impl CsrfProtection for AesGcmCsrfProtection {
     }
 
     fn generate_token(&self, token: &[u8]) -> Result<CsrfToken, CsrfError> {
-        // TODO check that token.len() == 64
+        if token.len() != 64 {
+            return Err(CsrfError::InternalError);
+        }
 
         let mut nonce = [0; 12];
         self.random_bytes(&mut nonce)?;
@@ -574,7 +583,6 @@ pub struct ChaCha20Poly1305CsrfProtection {
 }
 
 impl ChaCha20Poly1305CsrfProtection {
-    // TODO
     pub fn from_key(aead_key: [u8; 32]) -> Self {
         ChaCha20Poly1305CsrfProtection {
             rng: SystemRandom::new(),
@@ -614,7 +622,9 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
     }
 
     fn generate_cookie(&self, token: &[u8], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError> {
-        // TODO check that token.len() == 64
+        if token.len() != 64 {
+            return Err(CsrfError::InternalError);
+        }
 
         let expires = time::precise_time_s() as i64 + ttl_seconds;
         let expires_bytes = unsafe { mem::transmute::<i64, [u8; 8]>(expires) };
@@ -659,7 +669,9 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
     }
 
     fn generate_token(&self, token: &[u8]) -> Result<CsrfToken, CsrfError> {
-        // TODO check that token.len() == 64
+        if token.len() != 64 {
+            return Err(CsrfError::InternalError);
+        }
 
         let mut nonce = [0; 8];
         self.random_bytes(&mut nonce)?;
@@ -795,6 +807,8 @@ mod tests {
                 use $crate::core::{CsrfProtection, $strct};
                 use rustc_serialize::base64::FromBase64;
 
+                const KEY_32: [u8; 32] = *b"01234567012345670123456701234567";
+
                 #[test]
                 fn from_password() {
                     let _ = $strct::from_password(b"correct horse battery staple");
@@ -802,7 +816,7 @@ mod tests {
 
                 #[test]
                 fn verification_succeeds() {
-                    let protect = $strct::from_key(*b"01234567012345670123456701234567");
+                    let protect = $strct::from_key(KEY_32);
                     let (token, cookie) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/cookie pair");
                     let token = token.b64_string().from_base64().expect("token not base64");
@@ -815,7 +829,7 @@ mod tests {
 
                 #[test]
                 fn modified_cookie_sig_fails() {
-                    let protect = $strct::from_key(*b"01234567012345670123456701234567");
+                    let protect = $strct::from_key(KEY_32);
                     let (_, mut cookie) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/cookie pair");
                     let cookie_len = cookie.bytes.len();
@@ -826,7 +840,7 @@ mod tests {
 
                 #[test]
                 fn modified_cookie_value_fails() {
-                    let protect = $strct::from_key(*b"01234567012345670123456701234567");
+                    let protect = $strct::from_key(KEY_32);
                     let (_, mut cookie) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/cookie pair");
                     cookie.bytes[0] ^= 0x01;
@@ -836,7 +850,7 @@ mod tests {
 
                 #[test]
                 fn modified_token_sig_fails() {
-                    let protect = $strct::from_key(*b"01234567012345670123456701234567");
+                    let protect = $strct::from_key(KEY_32);
                     let (mut token, _) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/token pair");
                     let token_len = token.bytes.len();
@@ -847,7 +861,7 @@ mod tests {
 
                 #[test]
                 fn modified_token_value_fails() {
-                    let protect = $strct::from_key(*b"01234567012345670123456701234567");
+                    let protect = $strct::from_key(KEY_32);
                     let (mut token, _) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/token pair");
                     token.bytes[0] ^= 0x01;
@@ -857,7 +871,7 @@ mod tests {
 
                 #[test]
                 fn mismatched_cookie_token_fail() {
-                    let protect = $strct::from_key(*b"01234567012345670123456701234567");
+                    let protect = $strct::from_key(KEY_32);
                     let (token, _) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/token pair");
                     let (_, cookie) = protect.generate_token_pair(None, 300)
@@ -873,7 +887,7 @@ mod tests {
 
                 #[test]
                 fn expired_token_fail() {
-                    let protect = $strct::from_key(*b"01234567012345670123456701234567");
+                    let protect = $strct::from_key(KEY_32);
                     let (token, cookie) = protect.generate_token_pair(None, -1)
                         .expect("couldn't generate token/cookie pair");
                     let token = token.b64_string().from_base64().expect("token not base64");
