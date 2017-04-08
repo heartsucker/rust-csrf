@@ -5,6 +5,9 @@
 //! web framework of your choice. `csrf` generates encrypyed, signed tokens and cookies, and
 //! verifies that they have not been tampered with and that they match.
 //!
+//! This crate is used by [iron-csrf](https://crates.io/crates/iron-csrf) and be used as a
+//! reference for using `csrf` in other applications.
+//!
 //! ## Hello, CSRF.
 //!
 //! A simple example of how to use this library is as follows.

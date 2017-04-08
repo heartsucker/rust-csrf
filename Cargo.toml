@@ -9,7 +9,7 @@ documentation = "https://docs.rs/csrf"
 readme = "README.md"
 license = "MIT"
 keywords = [ "csrf", "web", "security", "http" ]
-categories = [ "web-programming::http-server", "authentication", "cryptography" ]
+categories = [ "web-programming", "authentication", "cryptography" ]
 
 [badges]
 travis-ci = { repository = "heartsucker/rust-csrf", branch = "develop" }

@@ -2,7 +2,9 @@
 
 Primitives for building CSRF protection.
 
-Documentation is hosted at [docs.rs](https://docs.rs/csrf/).
+Documentation is hosted at [docs.rs](https://docs.rs/csrf/). This crate is used by
+[iron-csrf](https://github.com/heatsucker/iron-csrf) and be used as a reference for
+using `rust-csrf` in other applications.
 
 ## Contributing
 

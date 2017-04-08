@@ -199,7 +199,7 @@ pub trait CsrfProtection: Send + Sync {
 }
 
 
-/// Uses HMAC to provide signed, encrypted CSRF tokens and cookies.
+/// Uses HMAC to provide authenticated CSRF tokens and cookies.
 pub struct HmacCsrfProtection {
     rng: SystemRandom,
     hmac_key: [u8; 32],
