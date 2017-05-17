@@ -1,6 +1,6 @@
 [package]
 name = "csrf"
-version = "0.1.0"
+version = "0.2.0"
 authors = [ "heartsucker <heartsucker@autistici.org>" ]
 description = "CSRF protection primitives"
 homepage = "https://github.com/heartsucker/rust-csrf"
@@ -9,10 +9,10 @@ documentation = "https://docs.rs/csrf"
 readme = "README.md"
 license = "MIT"
 keywords = [ "csrf", "web", "security", "http" ]
-categories = [ "web-programming::http-server", "authentication", "cryptography" ]
+categories = [ "web-programming", "authentication", "cryptography" ]
 
 [badges]
-travis-ci = { repository = "https://github.com/heartsucker/rust-csrf", branch = "develop" }
+travis-ci = { repository = "heartsucker/rust-csrf", branch = "develop" }
 
 [lib]
 name = "csrf"
@@ -22,9 +22,9 @@ path = "./src/lib.rs"
 iron = [ "typemap" ]
 
 [dependencies]
+data-encoding = "2.0.0-rc.1"
 log = "0.3"
-ring = "0.7"
+ring = "0.9.5"
 rust-crypto = "0.2"
-rustc-serialize = "0.3"
 time = "0.1"
 typemap = { version = "0.3", optional = true }
