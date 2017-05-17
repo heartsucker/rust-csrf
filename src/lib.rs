@@ -14,10 +14,10 @@
 //!
 //! ```
 //! extern crate csrf;
-//! extern crate rustc_serialize;
+//! extern crate data_encoding;
 //!
 //! use csrf::{AesGcmCsrfProtection, CsrfProtection};
-//! use rustc_serialize::base64::FromBase64;
+//! use data_encoding::BASE64;
 //!
 //! fn main() {
 //!     let protect = AesGcmCsrfProtection::from_key(*b"01234567012345670123456701234567");
@@ -34,8 +34,8 @@
 //!
 //!     // extract them from an incoming request
 //!
-//!     let token_bytes = token_str.from_base64().expect("token not base64");
-//!     let cookie_bytes= cookie_str.from_base64().expect("cookie not base64");
+//!     let token_bytes = BASE64.decode(token_str.as_bytes()).expect("token not base64");
+//!     let cookie_bytes= BASE64.decode(cookie_str.as_bytes()).expect("cookie not base64");
 //!
 //!     let parsed_token = protect.parse_token(&token_bytes).expect("token not parsed");
 //!     let parsed_cookie = protect.parse_cookie(&cookie_bytes).expect("cookie not parsed");
@@ -50,11 +50,13 @@
 //! unclear, please read the [Wikipedia
 //! article](https://en.wikipedia.org/wiki/Cross-site_request_forgery).
 
+#![deny(missing_docs)]
+
 extern crate crypto;
+extern crate data_encoding;
 #[macro_use]
 extern crate log;
 extern crate ring;
-extern crate rustc_serialize;
 extern crate time;
 #[cfg(feature = "iron")]
 extern crate typemap;

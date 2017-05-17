@@ -11,8 +11,8 @@ use crypto::hmac::Hmac;
 use crypto::mac::{Mac, MacResult};
 use crypto::scrypt::{scrypt, ScryptParams};
 use crypto::sha2::Sha256;
-use ring::rand::SystemRandom;
-use rustc_serialize::base64::{self, ToBase64};
+use data_encoding::{BASE64, BASE64URL};
+use ring::rand::{SystemRandom, SecureRandom};
 use time;
 #[cfg(feature = "iron")]
 use typemap;
@@ -36,7 +36,9 @@ const SCRYPT_SALT: &'static [u8; 21] = b"rust-csrf-scrypt-salt";
 /// An `enum` of all CSRF related errors.
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub enum CsrfError {
+    /// There was an internal error.
     InternalError,
+    /// There was CSRF token validation failure.
     ValidationFailure,
 }
 
@@ -63,6 +65,7 @@ pub struct CsrfToken {
 }
 
 impl CsrfToken {
+    /// Create a new token from the given bytes.
     pub fn new(bytes: Vec<u8>) -> Self {
         // TODO make this return a Result and check that bytes is long enough
         CsrfToken { bytes: bytes }
@@ -70,12 +73,12 @@ impl CsrfToken {
 
     /// Retrieve the CSRF token as a base64 encoded string.
     pub fn b64_string(&self) -> String {
-        self.bytes.to_base64(base64::STANDARD)
+        BASE64.encode(&self.bytes)
     }
 
     /// Retrieve the CSRF token as a URL safe base64 encoded string.
     pub fn b64_url_string(&self) -> String {
-        self.bytes.to_base64(base64::URL_SAFE)
+        BASE64URL.encode(&self.bytes)
     }
 }
 
@@ -87,13 +90,15 @@ pub struct CsrfCookie {
 }
 
 impl CsrfCookie {
+    /// Create a new cookie from hte given token bytes.
     pub fn new(bytes: Vec<u8>) -> Self {
         // TODO make this return a Result and check that bytes is long enough
         CsrfCookie { bytes: bytes }
     }
 
+    /// Get the base64 value of this cookie.
     pub fn b64_string(&self) -> String {
-        self.bytes.to_base64(base64::STANDARD)
+        BASE64.encode(&self.bytes)
     }
 }
 
@@ -105,10 +110,12 @@ pub struct UnencryptedCsrfToken {
 }
 
 impl UnencryptedCsrfToken {
+    /// Create a new unenrypted token.
     pub fn new(token: Vec<u8>) -> Self {
         UnencryptedCsrfToken { token: token }
     }
 
+    /// Retrieve the token value as bytes.
     pub fn token(&self) -> &[u8] {
         self.token.as_slice()
     }
@@ -123,6 +130,7 @@ pub struct UnencryptedCsrfCookie {
 }
 
 impl UnencryptedCsrfCookie {
+    /// Create a new unenrypted cookie.
     pub fn new(expires: i64, token: Vec<u8>) -> Self {
         UnencryptedCsrfCookie {
             expires: expires,
@@ -566,6 +574,7 @@ pub struct ChaCha20Poly1305CsrfProtection {
 }
 
 impl ChaCha20Poly1305CsrfProtection {
+    /// Given a key, return a `ChaCha20Poly1305CsrfProtection` instance.
     pub fn from_key(aead_key: [u8; 32]) -> Self {
         ChaCha20Poly1305CsrfProtection {
             rng: SystemRandom::new(),
@@ -780,7 +789,7 @@ mod tests {
         ($strct: ident, $md: ident) => {
             mod $md {
                 use $crate::core::{CsrfProtection, $strct};
-                use rustc_serialize::base64::FromBase64;
+                use data_encoding::BASE64;
 
                 const KEY_32: [u8; 32] = *b"01234567012345670123456701234567";
 
@@ -794,9 +803,9 @@ mod tests {
                     let protect = $strct::from_key(KEY_32);
                     let (token, cookie) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/cookie pair");
-                    let token = token.b64_string().from_base64().expect("token not base64");
+                    let ref token = BASE64.decode(token.b64_string().as_bytes()).expect("token not base64");
                     let token = protect.parse_token(&token).expect("token not parsed");
-                    let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
+                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes()).expect("cookie not base64");
                     let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
                     assert!(protect.verify_token_pair(&token, &cookie),
                             "could not verify token/cookie pair");
@@ -809,7 +818,7 @@ mod tests {
                         .expect("couldn't generate token/cookie pair");
                     let cookie_len = cookie.bytes.len();
                     cookie.bytes[cookie_len - 1] ^= 0x01;
-                    let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
+                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes()).expect("cookie not base64");
                     assert!(protect.parse_cookie(&cookie).is_err());
                 }
 
@@ -819,7 +828,7 @@ mod tests {
                     let (_, mut cookie) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/cookie pair");
                     cookie.bytes[0] ^= 0x01;
-                    let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
+                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes()).expect("cookie not base64");
                     assert!(protect.parse_cookie(&cookie).is_err());
                 }
 
@@ -830,7 +839,7 @@ mod tests {
                         .expect("couldn't generate token/token pair");
                     let token_len = token.bytes.len();
                     token.bytes[token_len - 1] ^= 0x01;
-                    let token = token.b64_string().from_base64().expect("token not base64");
+                    let ref token = BASE64.decode(token.b64_string().as_bytes()).expect("token not base64");
                     assert!(protect.parse_token(&token).is_err());
                 }
 
@@ -840,7 +849,7 @@ mod tests {
                     let (mut token, _) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/token pair");
                     token.bytes[0] ^= 0x01;
-                    let token = token.b64_string().from_base64().expect("token not base64");
+                    let ref token = BASE64.decode(token.b64_string().as_bytes()).expect("token not base64");
                     assert!(protect.parse_token(&token).is_err());
                 }
 
@@ -852,9 +861,9 @@ mod tests {
                     let (_, cookie) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/token pair");
 
-                    let token = token.b64_string().from_base64().expect("token not base64");
+                    let ref token = BASE64.decode(token.b64_string().as_bytes()).expect("token not base64");
                     let token = protect.parse_token(&token).expect("token not parsed");
-                    let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
+                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes()).expect("cookie not base64");
                     let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
                     assert!(!protect.verify_token_pair(&token, &cookie),
                             "verified token/cookie pair when failure expected");
@@ -865,9 +874,9 @@ mod tests {
                     let protect = $strct::from_key(KEY_32);
                     let (token, cookie) = protect.generate_token_pair(None, -1)
                         .expect("couldn't generate token/cookie pair");
-                    let token = token.b64_string().from_base64().expect("token not base64");
+                    let ref token = BASE64.decode(token.b64_string().as_bytes()).expect("token not base64");
                     let token = protect.parse_token(&token).expect("token not parsed");
-                    let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
+                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes()).expect("cookie not base64");
                     let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
                     assert!(!protect.verify_token_pair(&token, &cookie),
                             "verified token/cookie pair when failure expected");
