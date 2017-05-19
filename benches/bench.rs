@@ -1,7 +1,7 @@
 #![feature(test)]
 
 extern crate csrf;
-extern crate rustc_serialize;
+extern crate data_encoding;
 #[cfg(test)]
 extern crate test;
 
@@ -9,7 +9,7 @@ macro_rules! benchmark {
     ($strct: ident, $md: ident) => {
         mod $md {
             use csrf::{CsrfProtection, $strct};
-            use rustc_serialize::base64::FromBase64;
+            use data_encoding::BASE64;
             use test::Bencher;
 
             const KEY_32: [u8; 32] = *b"01234567012345670123456701234567";
@@ -31,9 +31,9 @@ macro_rules! benchmark {
                 for _ in 0..10 {
                     let (token, cookie) = protect.generate_token_pair(Some(TOKEN), 3600)
                         .expect("failed to generate token");
-                    let token = token.b64_string().from_base64().expect("token not base64");
+                    let token = BASE64.decode(token.b64_string().as_bytes()).expect("token not base64");
                     let token = protect.parse_token(&token).expect("token not parsed");
-                    let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
+                    let cookie = BASE64.decode(cookie.b64_string().as_bytes()).expect("cookie not base64");
                     let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
                     pairs.push((token, cookie));
                 }
@@ -53,7 +53,7 @@ macro_rules! benchmark {
                 for _ in 0..10 {
                     let (_, cookie) = protect.generate_token_pair(Some(TOKEN), 3600)
                         .expect("failed to generate cookie");
-                    let cookie = cookie.b64_string().from_base64().expect("cookie not base64");
+                    let cookie = BASE64.decode(cookie.b64_string().as_bytes()).expect("cookie not base64");
                     cookies.push(cookie)
                 }
 
@@ -72,7 +72,7 @@ macro_rules! benchmark {
                 for _ in 0..10 {
                     let (token, _) = protect.generate_token_pair(Some(TOKEN), 3600)
                         .expect("failed to generate token");
-                    let token = token.b64_string().from_base64().expect("token not base64");
+                    let token = BASE64.decode(token.b64_string().as_bytes()).expect("token not base64");
                     tokens.push(token)
                 }
 
@@ -91,7 +91,7 @@ macro_rules! benchmark {
                 for _ in 0..10 {
                     let (_, cookie) = protect.generate_token_pair(Some(TOKEN), 3600)
                         .expect("failed to generate cookie");
-                    let mut cookie = cookie.b64_string().from_base64().expect("cookie not base64");
+                    let mut cookie = BASE64.decode(cookie.b64_string().as_bytes()).expect("cookie not base64");
                     let cookie_len = cookie.len();
                     cookie[cookie_len - 1] ^= 0x01;
                     cookies.push(cookie)
@@ -112,7 +112,7 @@ macro_rules! benchmark {
                 for _ in 0..10 {
                     let (token, _) = protect.generate_token_pair(Some(TOKEN), 3600)
                         .expect("failed to generate token");
-                    let mut token = token.b64_string().from_base64().expect("token not base64");
+                    let mut token = BASE64.decode(token.b64_string().as_bytes()).expect("token not base64");
                     let token_len = token.len();
                     token[token_len - 1] ^= 0x01;
                     tokens.push(token)
@@ -133,7 +133,7 @@ macro_rules! benchmark {
                 for _ in 0..10 {
                     let (_, cookie) = protect.generate_token_pair(Some(TOKEN), 3600)
                         .expect("failed to generate cookie");
-                    let mut cookie = cookie.b64_string().from_base64().expect("cookie not base64");
+                    let mut cookie = BASE64.decode(cookie.b64_string().as_bytes()).expect("cookie not base64");
                     cookie[0] ^= 0x01;
                     cookies.push(cookie)
                 }
@@ -153,7 +153,7 @@ macro_rules! benchmark {
                 for _ in 0..10 {
                     let (token, _) = protect.generate_token_pair(Some(TOKEN), 3600)
                         .expect("failed to generate token");
-                    let mut token = token.b64_string().from_base64().expect("token not base64");
+                    let mut token = BASE64.decode(token.b64_string().as_bytes()).expect("token not base64");
                     token[0] ^= 0x01;
                     tokens.push(token)
                 }
