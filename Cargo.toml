@@ -12,7 +12,8 @@ keywords = [ "csrf", "web", "security", "http" ]
 categories = [ "web-programming", "authentication", "cryptography" ]
 
 [badges]
-travis-ci = { repository = "heartsucker/rust-csrf", branch = "develop" }
+travis-ci = { repository = "heartsucker/rust-csrf", branch = "master" }
+appveyor = { repository = "heartsucker/rust-csrf", branch = "master", service = "github" }
 
 [lib]
 name = "csrf"
