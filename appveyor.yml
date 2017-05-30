@@ -61,5 +61,4 @@ test_script:
 # TODO on failure cat Cargo.lock (but only we can't use make)
 
 cache:
-  - target
-  - C:\Users\appveyor\.cargo\
+  - C:\Users\appveyor\.cargo\bin
