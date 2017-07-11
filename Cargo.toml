@@ -25,7 +25,7 @@ iron = [ "typemap" ]
 [dependencies]
 data-encoding = "2.0.0-rc.1"
 log = "0.3"
-ring = "0.9.5"
+ring = "0.11"
 rust-crypto = "0.2"
 time = "0.1"
 typemap = { version = "0.3", optional = true }
