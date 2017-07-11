@@ -1,6 +1,6 @@
 [package]
 name = "csrf"
-version = "0.2.1"
+version = "0.2.2"
 authors = [ "heartsucker <heartsucker@autistici.org>" ]
 description = "CSRF protection primitives"
 homepage = "https://github.com/heartsucker/rust-csrf"
@@ -24,7 +24,7 @@ iron = [ "typemap" ]
 [dependencies]
 data-encoding = "2.0.0-rc.1"
 log = "0.3"
-ring = "0.9.5"
+ring = "0.11"
 rust-crypto = "0.2"
 time = "0.1"
 typemap = { version = "0.3", optional = true }
