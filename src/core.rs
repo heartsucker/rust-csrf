@@ -298,6 +298,7 @@ impl CsrfProtection for HmacCsrfProtection {
 
     fn parse_cookie(&self, cookie: &[u8]) -> Result<UnencryptedCsrfCookie, CsrfError> {
         if cookie.len() != 104 {
+            debug!("Cookie too small. Not parsed.");
             return Err(CsrfError::ValidationFailure);
         }
 
@@ -333,6 +334,7 @@ impl CsrfProtection for HmacCsrfProtection {
 
     fn parse_token(&self, token: &[u8]) -> Result<UnencryptedCsrfToken, CsrfError> {
         if token.len() != 96 {
+            debug!("Token too small. Not parsed.");
             return Err(CsrfError::ValidationFailure);
         }
 
@@ -489,6 +491,7 @@ impl CsrfProtection for AesGcmCsrfProtection {
 
     fn parse_cookie(&self, cookie: &[u8]) -> Result<UnencryptedCsrfCookie, CsrfError> {
         if cookie.len() != 116 {
+            debug!("Cookie too small. Not parsed.");
             return Err(CsrfError::ValidationFailure);
         }
 
@@ -531,6 +534,7 @@ impl CsrfProtection for AesGcmCsrfProtection {
 
     fn parse_token(&self, token: &[u8]) -> Result<UnencryptedCsrfToken, CsrfError> {
         if token.len() != 108 {
+            debug!("Token too small. Not parsed.");
             return Err(CsrfError::ValidationFailure);
         }
 
@@ -695,6 +699,7 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
 
     fn parse_cookie(&self, cookie: &[u8]) -> Result<UnencryptedCsrfCookie, CsrfError> {
         if cookie.len() != 112 {
+            debug!("Cookie too small. Not parsed.");
             return Err(CsrfError::ValidationFailure);
         }
 
@@ -737,6 +742,7 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
 
     fn parse_token(&self, token: &[u8]) -> Result<UnencryptedCsrfToken, CsrfError> {
         if token.len() != 104 {
+            debug!("Token too small. Not parsed.");
             return Err(CsrfError::ValidationFailure);
         }
 
