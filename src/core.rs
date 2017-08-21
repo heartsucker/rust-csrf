@@ -169,7 +169,16 @@ pub trait CsrfProtection: Send + Sync {
                          cookie: &UnencryptedCsrfCookie)
                          -> bool {
         let tokens_match = token.token == cookie.token;
-        let not_expired = cookie.expires > time::precise_time_s() as i64;
+        if !tokens_match {
+            debug!("Token did not match cookie: T: {:?}, C: {:?}", BASE64.encode(&token.token), BASE64.encode(&cookie.token));
+        }
+
+        let now = time::precise_time_s() as i64;
+        let not_expired = cookie.expires > now;
+        if !not_expired {
+            debug!("Cookie expired. Expiration: {}, Current time: {}", cookie.expires, now);
+        }
+
         tokens_match && not_expired
     }
 
