@@ -200,12 +200,12 @@ pub trait CsrfProtection: Send + Sync {
         let mut token = [0; 64];
         match previous_token_value {
             Some(ref previous) if previous.len() == 64 => {
-                for i in 0..64 {
-                    token[i] = previous[i];
-                }
+                token.copy_from_slice(previous)
             },
-            // blindly ignore all to
-            _ => self.random_bytes(&mut token)?,
+            _ => {
+                debug!("Generating new CSRF token.");
+                self.random_bytes(&mut token)?
+            },
         }
 
         match (self.generate_token(&token), self.generate_cookie(&token, ttl_seconds)) {
