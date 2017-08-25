@@ -198,7 +198,7 @@ pub trait CsrfProtection: Send + Sync {
                            ttl_seconds: i64)
                            -> Result<(CsrfToken, CsrfCookie), CsrfError> {
         let token = match previous_token_value {
-            Some(previous) => *previous.clone(),
+            Some(ref previous) => *previous.clone(),
             None => {
                 debug!("Generating new CSRF token.");
                 let mut token = [0; 64];
