@@ -197,16 +197,15 @@ pub trait CsrfProtection: Send + Sync {
                            previous_token_value: Option<&[u8; 64]>,
                            ttl_seconds: i64)
                            -> Result<(CsrfToken, CsrfCookie), CsrfError> {
-        let mut token = [0; 64];
-        match previous_token_value {
-            Some(ref previous) if previous.len() == 64 => {
-                token.copy_from_slice(previous)
-            },
-            _ => {
+        let token = match previous_token_value {
+            Some(previous) => *previous.clone(),
+            None => {
                 debug!("Generating new CSRF token.");
-                self.random_bytes(&mut token)?
+                let mut token = [0; 64];
+                self.random_bytes(&mut token)?;
+                token
             },
-        }
+        };
 
         match (self.generate_token(&token), self.generate_cookie(&token, ttl_seconds)) {
             (Ok(t), Ok(c)) => Ok((t, c)),
