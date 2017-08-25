@@ -153,6 +153,11 @@ impl UnencryptedCsrfCookie {
             token: token,
         }
     }
+
+    /// Retrieve the token value as bytes.
+    pub fn value(&self) -> &[u8] {
+        &self.token
+    }
 }
 
 /// The base trait that allows a developer to add CSRF protection to an application.
