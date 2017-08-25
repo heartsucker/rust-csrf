@@ -80,6 +80,11 @@ impl CsrfToken {
     pub fn b64_url_string(&self) -> String {
         BASE64URL.encode(&self.bytes)
     }
+
+    /// Get be raw value of this token.
+    pub fn value(&self) -> &[u8] {
+        &self.bytes
+    }
 }
 
 
@@ -100,6 +105,11 @@ impl CsrfCookie {
     pub fn b64_string(&self) -> String {
         BASE64.encode(&self.bytes)
     }
+
+    /// Get be raw value of this cookie.
+    pub fn value(&self) -> &[u8] {
+        &self.bytes
+    }
 }
 
 
@@ -116,8 +126,14 @@ impl UnencryptedCsrfToken {
     }
 
     /// Retrieve the token value as bytes.
+    #[deprecated]
     pub fn token(&self) -> &[u8] {
-        self.token.as_slice()
+        &self.token
+    }
+
+    /// Retrieve the token value as bytes.
+    pub fn value(&self) -> &[u8] {
+        &self.token
     }
 }
 
