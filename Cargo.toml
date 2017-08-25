@@ -1,6 +1,6 @@
 [package]
 name = "csrf"
-version = "0.2.5"
+version = "0.2.6"
 authors = [ "heartsucker <heartsucker@autistici.org>" ]
 description = "CSRF protection primitives"
 homepage = "https://github.com/heartsucker/rust-csrf"
