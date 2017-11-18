@@ -1,19 +1,21 @@
 //! Module containing the core functionality for CSRF protection
 
 use std::error::Error;
-use std::{fmt, mem, str};
+use std::{fmt, str};
+use std::io::Cursor;
 
+use byteorder::{BigEndian, WriteBytesExt, ReadBytesExt};
+use chrono::prelude::*;
+use chrono::Duration;
 use crypto::aead::{AeadEncryptor, AeadDecryptor};
 use crypto::aes::KeySize;
 use crypto::aes_gcm::AesGcm;
 use crypto::chacha20poly1305::ChaCha20Poly1305;
 use crypto::hmac::Hmac;
 use crypto::mac::{Mac, MacResult};
-use crypto::scrypt::{scrypt, ScryptParams};
 use crypto::sha2::Sha256;
 use data_encoding::{BASE64, BASE64URL};
-use ring::rand::{SystemRandom, SecureRandom};
-use time;
+use rand::{Rng, OsRng};
 #[cfg(feature = "iron")]
 use typemap;
 
@@ -29,8 +31,6 @@ pub const CSRF_HEADER: &'static str = "X-CSRF-Token";
 
 /// The name of the query parameter for the CSRF token.
 pub const CSRF_QUERY_STRING: &'static str = "csrf-token";
-
-const SCRYPT_SALT: &'static [u8; 21] = b"rust-csrf-scrypt-salt";
 
 
 /// An `enum` of all CSRF related errors.
@@ -95,7 +95,7 @@ pub struct CsrfCookie {
 }
 
 impl CsrfCookie {
-    /// Create a new cookie from hte given token bytes.
+    /// Create a new cookie from the given token bytes.
     pub fn new(bytes: Vec<u8>) -> Self {
         // TODO make this return a Result and check that bytes is long enough
         CsrfCookie { bytes: bytes }
@@ -162,12 +162,6 @@ impl UnencryptedCsrfCookie {
 
 /// The base trait that allows a developer to add CSRF protection to an application.
 pub trait CsrfProtection: Send + Sync {
-    /// Use a key derivation function (KDF) to generate key material.
-    ///
-    /// # Panics
-    /// This function may panic if the underlying crypto library fails catastrophically.
-    fn from_password(password: &[u8]) -> Self;
-
     /// Given a nonce and a time to live (TTL), create a cookie to send to the end user.
     fn generate_cookie(&self, token_value: &[u8; 64], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError>;
 
@@ -180,9 +174,6 @@ pub trait CsrfProtection: Send + Sync {
     /// Given a decoded byte array, deserialize, decrypt, and verify the token.
     fn parse_token(&self, token: &[u8]) -> Result<UnencryptedCsrfToken, CsrfError>;
 
-    /// Provide a random number generator for other functions.
-    fn rng(&self) -> &SystemRandom;
-
     /// Given a token pair that has been parsed, decoded, decrypted, and verified, return whether
     /// or not the token matches the cookie and they have not expired.
     fn verify_token_pair(&self,
@@ -194,7 +185,7 @@ pub trait CsrfProtection: Send + Sync {
             debug!("Token did not match cookie: T: {:?}, C: {:?}", BASE64.encode(&token.token), BASE64.encode(&cookie.token));
         }
 
-        let now = time::precise_time_s() as i64;
+        let now = Utc::now().timestamp();
         let not_expired = cookie.expires > now;
         if !not_expired {
             debug!("Cookie expired. Expiration: {}, Current time: {}", cookie.expires, now);
@@ -205,12 +196,11 @@ pub trait CsrfProtection: Send + Sync {
 
     /// Given a buffer, fill it with random bytes or error if this is not possible.
     fn random_bytes(&self, buf: &mut [u8]) -> Result<(), CsrfError> {
-        self.rng()
-            .fill(buf)
-            .map_err(|_| {
-                warn!("Failed to get random bytes");
-                CsrfError::InternalError
-            })
+        // TODO We had to get rid of `ring` because of `gcc` conflicts with `rust-crypto`, and
+        // `ring`'s RNG didn't require mutability. Now create a new one per call which is not a
+        // great idea.
+        OsRng::new().map_err(|_| CsrfError::InternalError)?.fill_bytes(buf);
+        Ok(())
     }
 
     /// Given an optional previous token and a TTL, generate a matching token and cookie pair.
@@ -238,7 +228,6 @@ pub trait CsrfProtection: Send + Sync {
 
 /// Uses HMAC to provide authenticated CSRF tokens and cookies.
 pub struct HmacCsrfProtection {
-    rng: SystemRandom,
     hmac_key: [u8; 32],
 }
 
@@ -246,7 +235,6 @@ impl HmacCsrfProtection {
     /// Given an HMAC key, return an `HmacCsrfProtection` instance.
     pub fn from_key(hmac_key: [u8; 32]) -> Self {
         HmacCsrfProtection {
-            rng: SystemRandom::new(),
             hmac_key: hmac_key,
         }
     }
@@ -257,52 +245,22 @@ impl HmacCsrfProtection {
 }
 
 impl CsrfProtection for HmacCsrfProtection {
-    /// Using `scrypt` with params `n=12`, `r=8`, `p=1`, generate the key material used for the
-    /// underlying crypto functions.
-    ///
-    /// # Panics
-    /// This function may panic if the underlying crypto library fails catastrophically.
-    fn from_password(password: &[u8]) -> Self {
-        let params = if cfg!(test) {
-            // scrypt is *slow*, so use these params for testing
-            ScryptParams::new(1, 8, 1)
-        } else {
-            ScryptParams::new(12, 8, 1)
-        };
-
-        let mut aead_key = [0; 32];
-        info!("Generating key material. This may take some time.");
-        scrypt(password, SCRYPT_SALT, &params, &mut aead_key);
-        info!("Key material generated.");
-
-        HmacCsrfProtection::from_key(aead_key)
-    }
-
-    fn rng(&self) -> &SystemRandom {
-        &self.rng
-    }
-
     fn generate_cookie(&self, token_value: &[u8; 64], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError> {
-        let expires = time::precise_time_s() as i64 + ttl_seconds;
-        let expires_bytes = unsafe { mem::transmute::<i64, [u8; 8]>(expires) };
+        let expires = (Utc::now() + Duration::seconds(ttl_seconds)).timestamp();
+        let mut expires_bytes = [0u8; 8];
+        (&mut expires_bytes[..]).write_i64::<BigEndian>(expires)
+            .map_err(|_| CsrfError::InternalError)?;
 
         let mut hmac = self.hmac();
-        hmac.input(token_value);
         hmac.input(&expires_bytes);
+        hmac.input(token_value);
         let mac = hmac.result();
         let code = mac.code();
 
         let mut transport = [0; 104];
-
-        for i in 0..64 {
-            transport[i] = token_value[i];
-        }
-        for i in 0..8 {
-            transport[i + 64] = expires_bytes[i];
-        }
-        for i in 0..32 {
-            transport[i + 72] = code[i];
-        }
+        transport[0..32].copy_from_slice(code);
+        transport[32..40].copy_from_slice(&expires_bytes);
+        transport[40..].copy_from_slice(token_value);
 
         Ok(CsrfCookie::new(transport.to_vec()))
     }
@@ -314,41 +272,21 @@ impl CsrfProtection for HmacCsrfProtection {
         let code = mac.code();
 
         let mut transport = [0; 96];
-
-        for i in 0..64 {
-            transport[i] = token_value[i];
-        }
-        for i in 0..32 {
-            transport[i + 64] = code[i];
-        }
+        transport[0..32].copy_from_slice(code);
+        transport[32..].copy_from_slice(token_value);
 
         Ok(CsrfToken::new(transport.to_vec()))
     }
 
     fn parse_cookie(&self, cookie: &[u8]) -> Result<UnencryptedCsrfCookie, CsrfError> {
         if cookie.len() != 104 {
-            debug!("Cookie too small. Not parsed.");
+            debug!("Cookie wrong size. Not parsed.");
             return Err(CsrfError::ValidationFailure);
         }
 
-        let mut cookie_bytes = [0; 64];
-        let mut expires_bytes = [0; 8];
-        let mut code = [0; 32];
-
-        for i in 0..64 {
-            cookie_bytes[i] = cookie[i];
-        }
-        for i in 0..8 {
-            expires_bytes[i] = cookie[i + 64]
-        }
-        for i in 0..32 {
-            code[i] = cookie[i + 72];
-        }
-
-        let mac = MacResult::new(&code);
+        let mac = MacResult::new(&cookie[0..32]);
         let mut hmac = self.hmac();
-        hmac.input(&cookie_bytes);
-        hmac.input(&expires_bytes);
+        hmac.input(&cookie[32..]);
         let result = hmac.result();
 
         if result != mac {
@@ -356,9 +294,10 @@ impl CsrfProtection for HmacCsrfProtection {
             return Err(CsrfError::ValidationFailure);
         }
 
-        let expires = unsafe { mem::transmute::<[u8; 8], i64>(expires_bytes) };
-
-        Ok(UnencryptedCsrfCookie::new(expires, cookie_bytes.to_vec()))
+        let mut cur = Cursor::new(&cookie[32..40]);
+        let expires = cur.read_i64::<BigEndian>()
+            .map_err(|_| CsrfError::InternalError)?;
+        Ok(UnencryptedCsrfCookie::new(expires, cookie[40..].to_vec()))
     }
 
     fn parse_token(&self, token: &[u8]) -> Result<UnencryptedCsrfToken, CsrfError> {
@@ -367,19 +306,9 @@ impl CsrfProtection for HmacCsrfProtection {
             return Err(CsrfError::ValidationFailure);
         }
 
-        let mut token_bytes = [0; 64];
-        let mut code = [0; 32];
-
-        for i in 0..64 {
-            token_bytes[i] = token[i];
-        }
-        for i in 0..32 {
-            code[i] = token[i + 64];
-        }
-
-        let mac = MacResult::new(&code);
+        let mac = MacResult::new(&token[0..32]);
         let mut hmac = self.hmac();
-        hmac.input(&token_bytes);
+        hmac.input(&token[32..]);
         let result = hmac.result();
 
         if result != mac {
@@ -387,14 +316,13 @@ impl CsrfProtection for HmacCsrfProtection {
             return Err(CsrfError::ValidationFailure);
         }
 
-        Ok(UnencryptedCsrfToken::new(token_bytes.to_vec()))
+        Ok(UnencryptedCsrfToken::new(token[32..].to_vec()))
     }
 }
 
 
 /// Uses AES-GCM to provide signed, encrypted CSRF tokens and cookies.
 pub struct AesGcmCsrfProtection {
-    rng: SystemRandom,
     aead_key: [u8; 32],
 }
 
@@ -402,7 +330,6 @@ impl AesGcmCsrfProtection {
     /// Given an AES256 key, return an `AesGcmCsrfProtection` instance.
     pub fn from_key(aead_key: [u8; 32]) -> Self {
         AesGcmCsrfProtection {
-            rng: SystemRandom::new(),
             aead_key: aead_key,
         }
     }
@@ -413,70 +340,30 @@ impl AesGcmCsrfProtection {
 }
 
 impl CsrfProtection for AesGcmCsrfProtection {
-    /// Using `scrypt` with params `n=12`, `r=8`, `p=1`, generate the key material used for the
-    /// underlying crypto functions.
-    ///
-    /// # Panics
-    /// This function may panic if the underlying crypto library fails catastrophically.
-    fn from_password(password: &[u8]) -> Self {
-        let params = if cfg!(test) {
-            // scrypt is *slow*, so use these params for testing
-            ScryptParams::new(1, 8, 1)
-        } else {
-            ScryptParams::new(12, 8, 1)
-        };
-
-        let mut aead_key = [0; 32];
-        info!("Generating key material. This may take some time.");
-        scrypt(password, SCRYPT_SALT, &params, &mut aead_key);
-        info!("Key material generated.");
-
-        AesGcmCsrfProtection::from_key(aead_key)
-    }
-
-    fn rng(&self) -> &SystemRandom {
-        &self.rng
-    }
-
     fn generate_cookie(&self, token_value: &[u8; 64], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError> {
-        let expires = time::precise_time_s() as i64 + ttl_seconds;
-        let expires_bytes = unsafe { mem::transmute::<i64, [u8; 8]>(expires) };
+        let expires = (Utc::now() + Duration::seconds(ttl_seconds)).timestamp();
+        let mut expires_bytes = [0u8; 8];
+        (&mut expires_bytes[..]).write_i64::<BigEndian>(expires)
+            .map_err(|_| CsrfError::InternalError)?;
 
         let mut nonce = [0; 12];
         self.random_bytes(&mut nonce)?;
 
-        let mut padding = [0; 16];
-        self.random_bytes(&mut padding)?;
+        let mut plaintext = [0; 104];
+        self.random_bytes(&mut plaintext[0..32])?; // padding
+        plaintext[32..40].copy_from_slice(&expires_bytes);
+        plaintext[40..].copy_from_slice(token_value);
 
-        let mut plaintext = [0; 88];
-
-        for i in 0..16 {
-            plaintext[i] = padding[i];
-        }
-        for i in 0..8 {
-            plaintext[i + 16] = expires_bytes[i];
-        }
-        for i in 0..64 {
-            plaintext[i + 24] = token_value[i];
-        }
-
-        let mut ciphertext = [0; 88];
+        let mut ciphertext = [0; 104];
         let mut tag = [0; 16];
         let mut aead = self.aead(&nonce);
 
         aead.encrypt(&plaintext, &mut ciphertext, &mut tag);
 
-        let mut transport = [0; 116];
-
-        for i in 0..88 {
-            transport[i] = ciphertext[i];
-        }
-        for i in 0..12 {
-            transport[i + 88] = nonce[i];
-        }
-        for i in 0..16 {
-            transport[i + 100] = tag[i];
-        }
+        let mut transport = [0; 132];
+        transport[0..12].copy_from_slice(&nonce);
+        transport[12..28].copy_from_slice(&tag);
+        transport[28..].copy_from_slice(&ciphertext);
 
         Ok(CsrfCookie::new(transport.to_vec()))
     }
@@ -485,124 +372,69 @@ impl CsrfProtection for AesGcmCsrfProtection {
         let mut nonce = [0; 12];
         self.random_bytes(&mut nonce)?;
 
-        let mut padding = [0; 16];
-        self.random_bytes(&mut padding)?;
+        let mut plaintext = [0; 96];
+        self.random_bytes(&mut plaintext[0..32])?; // padding
+        plaintext[32..].copy_from_slice(token_value);
 
-        let mut plaintext = [0; 80];
-
-        for i in 0..16 {
-            plaintext[i] = padding[i];
-        }
-        for i in 0..64 {
-            plaintext[i + 16] = token_value[i];
-        }
-
-        let mut ciphertext = [0; 80];
-        let mut tag = vec![0; 16];
+        let mut ciphertext = [0; 96];
+        let mut tag = [0; 16];
         let mut aead = self.aead(&nonce);
 
         aead.encrypt(&plaintext, &mut ciphertext, &mut tag);
 
-        let mut transport = [0; 108];
-
-        for i in 0..80 {
-            transport[i] = ciphertext[i];
-        }
-        for i in 0..12 {
-            transport[i + 80] = nonce[i];
-        }
-        for i in 0..16 {
-            transport[i + 92] = tag[i];
-        }
+        let mut transport = [0; 124];
+        transport[0..12].copy_from_slice(&nonce);
+        transport[12..28].copy_from_slice(&tag);
+        transport[28..].copy_from_slice(&ciphertext);
 
         Ok(CsrfToken::new(transport.to_vec()))
     }
 
     fn parse_cookie(&self, cookie: &[u8]) -> Result<UnencryptedCsrfCookie, CsrfError> {
-        if cookie.len() != 116 {
-            debug!("Cookie too small. Not parsed.");
+        if cookie.len() != 132 {
+            debug!("Cookie wrong size. Not parsed.");
             return Err(CsrfError::ValidationFailure);
         }
 
-        let mut ciphertext = [0; 88];
         let mut nonce = [0; 12];
-        let mut tag = [0; 16];
+        nonce.copy_from_slice(&cookie[0..12]);
 
-        for i in 0..88 {
-            ciphertext[i] = cookie[i];
-        }
-        for i in 0..12 {
-            nonce[i] = cookie[i + 88];
-        }
-        for i in 0..16 {
-            tag[i] = cookie[i + 100];
-        }
-
-        let mut plaintext = [0; 88];
+        let mut plaintext = [0; 104];
         let mut aead = self.aead(&nonce);
-        if !aead.decrypt(&ciphertext, &mut plaintext, &tag) {
+        if !aead.decrypt(&cookie[28..], &mut plaintext, &cookie[12..28]) {
             info!("Failed to decrypt CSRF cookie");
             return Err(CsrfError::ValidationFailure);
         }
 
-        let mut expires_bytes = [0; 8];
-        let mut token = [0; 64];
-
-        // skip 16 bytes of padding
-        for i in 0..8 {
-            expires_bytes[i] = plaintext[i + 16];
-        }
-        for i in 0..64 {
-            token[i] = plaintext[i + 24];
-        }
-
-        let expires = unsafe { mem::transmute::<[u8; 8], i64>(expires_bytes) };
-
-        Ok(UnencryptedCsrfCookie::new(expires, token.to_vec()))
+        let mut cur = Cursor::new(&plaintext[32..40]);
+        let expires = cur.read_i64::<BigEndian>()
+            .map_err(|_| CsrfError::InternalError)?;
+        Ok(UnencryptedCsrfCookie::new(expires, plaintext[40..].to_vec()))
     }
 
     fn parse_token(&self, token: &[u8]) -> Result<UnencryptedCsrfToken, CsrfError> {
-        if token.len() != 108 {
+        if token.len() != 124 {
             debug!("Token too small. Not parsed.");
             return Err(CsrfError::ValidationFailure);
         }
 
-        let mut ciphertext = [0; 80];
         let mut nonce = [0; 12];
-        let mut tag = [0; 16];
+        nonce.copy_from_slice(&token[0..12]);
 
-        for i in 0..80 {
-            ciphertext[i] = token[i];
-        }
-        for i in 0..12 {
-            nonce[i] = token[i + 80];
-        }
-        for i in 0..16 {
-            tag[i] = token[i + 92];
-        }
-
-        let mut plaintext = [0; 80];
+        let mut plaintext = [0; 96];
         let mut aead = self.aead(&nonce);
-        if !aead.decrypt(&ciphertext, &mut plaintext, &tag) {
+        if !aead.decrypt(&token[28..], &mut plaintext, &token[12..28]) {
             info!("Failed to decrypt CSRF token");
             return Err(CsrfError::ValidationFailure);
         }
 
-        let mut token = [0; 64];
-
-        // skip 16 bytes of padding
-        for i in 0..64 {
-            token[i] = plaintext[i + 16];
-        }
-
-        Ok(UnencryptedCsrfToken::new(token.to_vec()))
+        Ok(UnencryptedCsrfToken::new(plaintext[32..].to_vec()))
     }
 }
 
 
 /// Uses ChaCha20Poly1305 to provide signed, encrypted CSRF tokens and cookies.
 pub struct ChaCha20Poly1305CsrfProtection {
-    rng: SystemRandom,
     aead_key: [u8; 32],
 }
 
@@ -610,7 +442,6 @@ impl ChaCha20Poly1305CsrfProtection {
     /// Given a key, return a `ChaCha20Poly1305CsrfProtection` instance.
     pub fn from_key(aead_key: [u8; 32]) -> Self {
         ChaCha20Poly1305CsrfProtection {
-            rng: SystemRandom::new(),
             aead_key: aead_key,
         }
     }
@@ -621,70 +452,30 @@ impl ChaCha20Poly1305CsrfProtection {
 }
 
 impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
-    /// Using `scrypt` with params `n=12`, `r=8`, `p=1`, generate the key material used for the
-    /// underlying crypto functions.
-    ///
-    /// # Panics
-    /// This function may panic if the underlying crypto library fails catastrophically.
-    fn from_password(password: &[u8]) -> Self {
-        let params = if cfg!(test) {
-            // scrypt is *slow*, so use these params for testing
-            ScryptParams::new(1, 8, 1)
-        } else {
-            ScryptParams::new(12, 8, 1)
-        };
-
-        let mut aead_key = [0; 32];
-        info!("Generating key material. This may take some time.");
-        scrypt(password, SCRYPT_SALT, &params, &mut aead_key);
-        info!("Key material generated.");
-
-        ChaCha20Poly1305CsrfProtection::from_key(aead_key)
-    }
-
-    fn rng(&self) -> &SystemRandom {
-        &self.rng
-    }
-
     fn generate_cookie(&self, token_value: &[u8; 64], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError> {
-        let expires = time::precise_time_s() as i64 + ttl_seconds;
-        let expires_bytes = unsafe { mem::transmute::<i64, [u8; 8]>(expires) };
+        let expires = (Utc::now() + Duration::seconds(ttl_seconds)).timestamp();
+        let mut expires_bytes = [0u8; 8];
+        (&mut expires_bytes[..]).write_i64::<BigEndian>(expires)
+            .map_err(|_| CsrfError::InternalError)?;
 
         let mut nonce = [0; 8];
         self.random_bytes(&mut nonce)?;
 
-        let mut padding = [0; 16];
-        self.random_bytes(&mut padding)?;
+        let mut plaintext = [0; 104];
+        self.random_bytes(&mut plaintext[0..32])?; // padding
+        plaintext[32..40].copy_from_slice(&expires_bytes);
+        plaintext[40..].copy_from_slice(token_value);
 
-        let mut plaintext = [0; 88];
-
-        for i in 0..16 {
-            plaintext[i] = padding[i];
-        }
-        for i in 0..8 {
-            plaintext[i + 16] = expires_bytes[i];
-        }
-        for i in 0..64 {
-            plaintext[i + 24] = token_value[i];
-        }
-
-        let mut ciphertext = [0; 88];
+        let mut ciphertext = [0; 104];
         let mut tag = [0; 16];
         let mut aead = self.aead(&nonce);
 
         aead.encrypt(&plaintext, &mut ciphertext, &mut tag);
 
-        let mut transport = [0; 112];
-
-        for i in 0..88 {
-            transport[i] = ciphertext[i];
-        }
-        for i in 0..8 {
-            transport[i + 88] = nonce[i];
-        }
-        for i in 0..16 {
-            transport[i + 96] = tag[i];
-        }
+        let mut transport = [0; 128];
+        transport[0..8].copy_from_slice(&nonce);
+        transport[8..24].copy_from_slice(&tag);
+        transport[24..].copy_from_slice(&ciphertext);
 
         Ok(CsrfCookie::new(transport.to_vec()))
     }
@@ -693,117 +484,63 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
         let mut nonce = [0; 8];
         self.random_bytes(&mut nonce)?;
 
-        let mut padding = [0; 16];
-        self.random_bytes(&mut padding)?;
+        let mut plaintext = [0; 96];
+        self.random_bytes(&mut plaintext[0..32])?; // padding
+        plaintext[32..].copy_from_slice(token_value);
 
-        let mut plaintext = [0; 80];
-
-        for i in 0..16 {
-            plaintext[i] = padding[i];
-        }
-        for i in 0..64 {
-            plaintext[i + 16] = token_value[i];
-        }
-
-        let mut ciphertext = [0; 80];
-        let mut tag = vec![0; 16];
+        let mut ciphertext = [0; 96];
+        let mut tag = [0; 16];
         let mut aead = self.aead(&nonce);
 
         aead.encrypt(&plaintext, &mut ciphertext, &mut tag);
 
-        let mut transport = [0; 104];
-
-        for i in 0..80 {
-            transport[i] = ciphertext[i];
-        }
-        for i in 0..8 {
-            transport[i + 80] = nonce[i];
-        }
-        for i in 0..16 {
-            transport[i + 88] = tag[i];
-        }
+        let mut transport = [0; 120];
+        transport[0..8].copy_from_slice(&nonce);
+        transport[8..24].copy_from_slice(&tag);
+        transport[24..].copy_from_slice(&ciphertext);
 
         Ok(CsrfToken::new(transport.to_vec()))
     }
 
     fn parse_cookie(&self, cookie: &[u8]) -> Result<UnencryptedCsrfCookie, CsrfError> {
-        if cookie.len() != 112 {
-            debug!("Cookie too small. Not parsed.");
+        if cookie.len() != 128 {
+            debug!("Cookie wrong size. Not parsed.");
             return Err(CsrfError::ValidationFailure);
         }
 
-        let mut ciphertext = [0; 88];
         let mut nonce = [0; 8];
-        let mut tag = [0; 16];
+        nonce.copy_from_slice(&cookie[0..8]);
 
-        for i in 0..88 {
-            ciphertext[i] = cookie[i];
-        }
-        for i in 0..8 {
-            nonce[i] = cookie[i + 88];
-        }
-        for i in 0..16 {
-            tag[i] = cookie[i + 96];
-        }
-
-        let mut plaintext = [0; 88];
+        let mut plaintext = [0; 104];
         let mut aead = self.aead(&nonce);
-        if !aead.decrypt(&ciphertext, &mut plaintext, &tag) {
+        if !aead.decrypt(&cookie[24..], &mut plaintext, &cookie[8..24]) {
             info!("Failed to decrypt CSRF cookie");
             return Err(CsrfError::ValidationFailure);
         }
 
-        let mut expires_bytes = [0; 8];
-        let mut token = [0; 64];
-
-        // skip 16 bytes of padding
-        for i in 0..8 {
-            expires_bytes[i] = plaintext[i + 16];
-        }
-        for i in 0..64 {
-            token[i] = plaintext[i + 24];
-        }
-
-        let expires = unsafe { mem::transmute::<[u8; 8], i64>(expires_bytes) };
-
-        Ok(UnencryptedCsrfCookie::new(expires, token.to_vec()))
+        let mut cur = Cursor::new(&plaintext[32..40]);
+        let expires = cur.read_i64::<BigEndian>()
+            .map_err(|_| CsrfError::InternalError)?;
+        Ok(UnencryptedCsrfCookie::new(expires, plaintext[40..].to_vec()))
     }
 
     fn parse_token(&self, token: &[u8]) -> Result<UnencryptedCsrfToken, CsrfError> {
-        if token.len() != 104 {
+        if token.len() != 120 {
             debug!("Token too small. Not parsed.");
             return Err(CsrfError::ValidationFailure);
         }
 
-        let mut ciphertext = [0; 80];
         let mut nonce = [0; 8];
-        let mut tag = [0; 16];
+        nonce.copy_from_slice(&token[0..8]);
 
-        for i in 0..80 {
-            ciphertext[i] = token[i];
-        }
-        for i in 0..8 {
-            nonce[i] = token[i + 80];
-        }
-        for i in 0..16 {
-            tag[i] = token[i + 88];
-        }
-
-        let mut plaintext = [0; 80];
+        let mut plaintext = [0; 96];
         let mut aead = self.aead(&nonce);
-        if !aead.decrypt(&ciphertext, &mut plaintext, &tag) {
+        if !aead.decrypt(&token[24..], &mut plaintext, &token[8..24]) {
             info!("Failed to decrypt CSRF token");
             return Err(CsrfError::ValidationFailure);
         }
 
-        let mut token = [0; 64];
-
-        // skip 16 bytes of padding
-        for i in 0..64 {
-            token[i] = plaintext[i + 16];
-        }
-
-        Ok(UnencryptedCsrfToken::new(token.to_vec()))
+        Ok(UnencryptedCsrfToken::new(plaintext[32..].to_vec()))
     }
 }
 
@@ -818,7 +555,6 @@ impl typemap::Key for CsrfToken {
 mod tests {
     // TODO write test that ensures encrypted messages don't contain the plaintext
     // TODO test that checks tokens are repeated when given Some
-    // TODO use macros for writing all of these
 
     macro_rules! test_cases {
         ($strct: ident, $md: ident) => {
@@ -827,11 +563,6 @@ mod tests {
                 use data_encoding::BASE64;
 
                 const KEY_32: [u8; 32] = *b"01234567012345670123456701234567";
-
-                #[test]
-                fn from_password() {
-                    let _ = $strct::from_password(b"correct horse battery staple");
-                }
 
                 #[test]
                 fn verification_succeeds() {

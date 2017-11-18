@@ -52,12 +52,13 @@
 
 #![deny(missing_docs)]
 
+extern crate byteorder;
+extern crate chrono;
 extern crate crypto;
 extern crate data_encoding;
 #[macro_use]
 extern crate log;
-extern crate ring;
-extern crate time;
+extern crate rand;
 #[cfg(feature = "iron")]
 extern crate typemap;
 
