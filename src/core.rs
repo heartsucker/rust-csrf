@@ -678,18 +678,6 @@ mod tests {
                 }
 
                 #[test]
-                fn modified_cookie_sig_fails() {
-                    let protect = $strct::from_key(KEY_32);
-                    let (_, mut cookie) = protect.generate_token_pair(None, 300)
-                        .expect("couldn't generate token/cookie pair");
-                    let cookie_len = cookie.bytes.len();
-                    cookie.bytes[cookie_len - 1] ^= 0x01;
-                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes())
-                        .expect("cookie not base64");
-                    assert!(protect.parse_cookie(&cookie).is_err());
-                }
-
-                #[test]
                 fn modified_cookie_value_fails() {
                     let protect = $strct::from_key(KEY_32);
                     let (_, mut cookie) = protect.generate_token_pair(None, 300)
@@ -698,18 +686,6 @@ mod tests {
                     let ref cookie = BASE64.decode(cookie.b64_string().as_bytes())
                         .expect("cookie not base64");
                     assert!(protect.parse_cookie(&cookie).is_err());
-                }
-
-                #[test]
-                fn modified_token_sig_fails() {
-                    let protect = $strct::from_key(KEY_32);
-                    let (mut token, _) = protect.generate_token_pair(None, 300)
-                        .expect("couldn't generate token/token pair");
-                    let token_len = token.bytes.len();
-                    token.bytes[token_len - 1] ^= 0x01;
-                    let ref token = BASE64.decode(token.b64_string().as_bytes())
-                        .expect("token not base64");
-                    assert!(protect.parse_token(&token).is_err());
                 }
 
                 #[test]
