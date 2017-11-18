@@ -544,6 +544,64 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
     }
 }
 
+/// This is used when one wants to rotate keys or switch from implementation to another. It accepts
+/// `1 + N` instances of `CsrfProtection` and uses only the first to generate tokens and cookies.
+/// The `N` remaining instances are used only for parsing.
+pub struct MultiCsrfProtection {
+    current: Box<CsrfProtection>,
+    previous: Vec<Box<CsrfProtection>>,
+}
+
+impl MultiCsrfProtection {
+    /// Create a new `MultiCsrfProtection` from one current `CsrfProtection` and some `N` previous
+    /// instances of `CsrfProtection`.
+    pub fn new(current: Box<CsrfProtection>, previous: Vec<Box<CsrfProtection>>) -> Self {
+        Self {
+            current,
+            previous,
+        }
+    }
+}
+
+impl CsrfProtection for MultiCsrfProtection {
+    fn generate_cookie(&self, token_value: &[u8; 64], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError> {
+        self.current.generate_cookie(token_value, ttl_seconds)
+    }
+
+    fn generate_token(&self, token_value: &[u8; 64]) -> Result<CsrfToken, CsrfError> {
+        self.current.generate_token(token_value)
+    }
+
+    fn parse_cookie(&self, cookie: &[u8]) -> Result<UnencryptedCsrfCookie, CsrfError> {
+        match self.current.parse_cookie(cookie) {
+            ok @ Ok(_) => return ok,
+            Err(_) => {
+                for protection in self.previous.iter() {
+                    match protection.parse_cookie(cookie) {
+                        ok @ Ok(_) => return ok,
+                        Err(_) => (),
+                    }
+                }
+            }
+        }
+        Err(CsrfError::ValidationFailure)
+    }
+
+    fn parse_token(&self, token: &[u8]) -> Result<UnencryptedCsrfToken, CsrfError> {
+        match self.current.parse_token(token) {
+            ok @ Ok(_) => return ok,
+            Err(_) => {
+                for protection in self.previous.iter() {
+                    match protection.parse_token(token) {
+                        ok @ Ok(_) => return ok,
+                        Err(_) => (),
+                    }
+                }
+            }
+        }
+        Err(CsrfError::ValidationFailure)
+    }
+}
 
 #[cfg(feature = "iron")]
 impl typemap::Key for CsrfToken {
@@ -556,13 +614,15 @@ mod tests {
     // TODO write test that ensures encrypted messages don't contain the plaintext
     // TODO test that checks tokens are repeated when given Some
 
+    const KEY_32: [u8; 32] = *b"01234567012345670123456701234567";
+    const KEY2_32: [u8; 32] = *b"76543210765432107654321076543210";
+
     macro_rules! test_cases {
         ($strct: ident, $md: ident) => {
             mod $md {
                 use $crate::core::{CsrfProtection, $strct};
                 use data_encoding::BASE64;
-
-                const KEY_32: [u8; 32] = *b"01234567012345670123456701234567";
+                use super::KEY_32;
 
                 #[test]
                 fn verification_succeeds() {
@@ -654,4 +714,81 @@ mod tests {
     test_cases!(AesGcmCsrfProtection, aesgcm);
     test_cases!(ChaCha20Poly1305CsrfProtection, chacha20poly1305);
     test_cases!(HmacCsrfProtection, hmac);
+
+    mod multi {
+        macro_rules! test_cases {
+            ($strct1: ident, $strct2: ident, $fn1: ident, $fn2: ident) => {
+                mod $fn2 {
+                    use data_encoding::BASE64;
+                    use super::super::{KEY_32, KEY2_32};
+                    use super::super::super::*;
+
+                    #[test]
+                    fn $fn1() {
+                        let protect = $strct1::from_key(KEY_32);
+                        let mut pairs = vec![];
+                        let pair = protect.generate_token_pair(None, 300)
+                            .expect("couldn't generate token/cookie pair");
+                        pairs.push(pair);
+
+                        let protect = MultiCsrfProtection::new(Box::new(protect), vec![]);
+                        let pair = protect.generate_token_pair(None, 300)
+                            .expect("couldn't generate token/cookie pair");
+                        pairs.push(pair);
+
+                        for &(ref token, ref cookie) in pairs.iter() {
+                            let ref token = BASE64.decode(token.b64_string().as_bytes()).expect("token not base64");
+                            let token = protect.parse_token(&token).expect("token not parsed");
+                            let ref cookie = BASE64.decode(cookie.b64_string().as_bytes()).expect("cookie not base64");
+                            let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
+                            assert!(protect.verify_token_pair(&token, &cookie),
+                                    "could not verify token/cookie pair");
+                        }
+                    }
+                    
+                    #[test]
+                    fn $fn2() {
+                        let protect_1 = $strct1::from_key(KEY_32);
+                        let mut pairs = vec![];
+                        let pair = protect_1.generate_token_pair(None, 300)
+                            .expect("couldn't generate token/cookie pair");
+                        pairs.push(pair);
+
+                        let protect_2 = $strct2::from_key(KEY2_32);
+                        let mut pairs = vec![];
+                        let pair = protect_2.generate_token_pair(None, 300)
+                            .expect("couldn't generate token/cookie pair");
+                        pairs.push(pair);
+
+                        let protect = MultiCsrfProtection::new(Box::new(protect_1), vec![Box::new(protect_2)]);
+                        let pair = protect.generate_token_pair(None, 300)
+                            .expect("couldn't generate token/cookie pair");
+                        pairs.push(pair);
+
+                        for &(ref token, ref cookie) in pairs.iter() {
+                            let ref token = BASE64.decode(token.b64_string().as_bytes()).expect("token not base64");
+                            let token = protect.parse_token(&token).expect("token not parsed");
+                            let ref cookie = BASE64.decode(cookie.b64_string().as_bytes()).expect("cookie not base64");
+                            let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
+                            assert!(protect.verify_token_pair(&token, &cookie),
+                                    "could not verify token/cookie pair");
+                        }
+                    }
+                }
+            }
+        }
+
+        test_cases!(AesGcmCsrfProtection, AesGcmCsrfProtection, aesgcm_then_none, aesgcm_then_aesgcm);
+        test_cases!(ChaCha20Poly1305CsrfProtection, ChaCha20Poly1305CsrfProtection, chacha20poly1305_then_none, chacha20poly1305_then_chacha20poly1305);
+        test_cases!(HmacCsrfProtection, HmacCsrfProtection, hmac_then_none, hmac_then_hmac);
+
+        test_cases!(ChaCha20Poly1305CsrfProtection, AesGcmCsrfProtection, chacha20poly1305_then_none, chacha20poly1305_then_aesgcm);
+        test_cases!(HmacCsrfProtection, AesGcmCsrfProtection, hmac_then_none, hmac_then_aesgcm);
+
+        test_cases!(AesGcmCsrfProtection, ChaCha20Poly1305CsrfProtection, aesgcm_then_none, aesgcm_then_chacha20poly1305);
+        test_cases!(HmacCsrfProtection, ChaCha20Poly1305CsrfProtection, hmac_then_none, hmac_then_chacha20poly1305);
+
+        test_cases!(AesGcmCsrfProtection, HmacCsrfProtection, aesgcm_then_none, aesgcm_then_hmac);
+        test_cases!(ChaCha20Poly1305CsrfProtection, HmacCsrfProtection, chacha20poly1305_then_none, chacha20poly1305_then_hmac);
+    }
 }
