@@ -163,7 +163,11 @@ impl UnencryptedCsrfCookie {
 /// The base trait that allows a developer to add CSRF protection to an application.
 pub trait CsrfProtection: Send + Sync {
     /// Given a nonce and a time to live (TTL), create a cookie to send to the end user.
-    fn generate_cookie(&self, token_value: &[u8; 64], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError>;
+    fn generate_cookie(
+        &self,
+        token_value: &[u8; 64],
+        ttl_seconds: i64,
+    ) -> Result<CsrfCookie, CsrfError>;
 
     /// Given a nonce, create a token to send to the end user.
     fn generate_token(&self, token_value: &[u8; 64]) -> Result<CsrfToken, CsrfError>;
@@ -176,19 +180,28 @@ pub trait CsrfProtection: Send + Sync {
 
     /// Given a token pair that has been parsed, decoded, decrypted, and verified, return whether
     /// or not the token matches the cookie and they have not expired.
-    fn verify_token_pair(&self,
-                         token: &UnencryptedCsrfToken,
-                         cookie: &UnencryptedCsrfCookie)
-                         -> bool {
+    fn verify_token_pair(
+        &self,
+        token: &UnencryptedCsrfToken,
+        cookie: &UnencryptedCsrfCookie,
+    ) -> bool {
         let tokens_match = token.token == cookie.token;
         if !tokens_match {
-            debug!("Token did not match cookie: T: {:?}, C: {:?}", BASE64.encode(&token.token), BASE64.encode(&cookie.token));
+            debug!(
+                "Token did not match cookie: T: {:?}, C: {:?}",
+                BASE64.encode(&token.token),
+                BASE64.encode(&cookie.token)
+            );
         }
 
         let now = Utc::now().timestamp();
         let not_expired = cookie.expires > now;
         if !not_expired {
-            debug!("Cookie expired. Expiration: {}, Current time: {}", cookie.expires, now);
+            debug!(
+                "Cookie expired. Expiration: {}, Current time: {}",
+                cookie.expires,
+                now
+            );
         }
 
         tokens_match && not_expired
@@ -199,15 +212,18 @@ pub trait CsrfProtection: Send + Sync {
         // TODO We had to get rid of `ring` because of `gcc` conflicts with `rust-crypto`, and
         // `ring`'s RNG didn't require mutability. Now create a new one per call which is not a
         // great idea.
-        OsRng::new().map_err(|_| CsrfError::InternalError)?.fill_bytes(buf);
+        OsRng::new()
+            .map_err(|_| CsrfError::InternalError)?
+            .fill_bytes(buf);
         Ok(())
     }
 
     /// Given an optional previous token and a TTL, generate a matching token and cookie pair.
-    fn generate_token_pair(&self,
-                           previous_token_value: Option<&[u8; 64]>,
-                           ttl_seconds: i64)
-                           -> Result<(CsrfToken, CsrfCookie), CsrfError> {
+    fn generate_token_pair(
+        &self,
+        previous_token_value: Option<&[u8; 64]>,
+        ttl_seconds: i64,
+    ) -> Result<(CsrfToken, CsrfCookie), CsrfError> {
         let token = match previous_token_value {
             Some(ref previous) => *previous.clone(),
             None => {
@@ -215,10 +231,13 @@ pub trait CsrfProtection: Send + Sync {
                 let mut token = [0; 64];
                 self.random_bytes(&mut token)?;
                 token
-            },
+            }
         };
 
-        match (self.generate_token(&token), self.generate_cookie(&token, ttl_seconds)) {
+        match (
+            self.generate_token(&token),
+            self.generate_cookie(&token, ttl_seconds),
+        ) {
             (Ok(t), Ok(c)) => Ok((t, c)),
             _ => Err(CsrfError::ValidationFailure),
         }
@@ -234,9 +253,7 @@ pub struct HmacCsrfProtection {
 impl HmacCsrfProtection {
     /// Given an HMAC key, return an `HmacCsrfProtection` instance.
     pub fn from_key(hmac_key: [u8; 32]) -> Self {
-        HmacCsrfProtection {
-            hmac_key: hmac_key,
-        }
+        HmacCsrfProtection { hmac_key: hmac_key }
     }
 
     fn hmac(&self) -> Hmac<Sha256> {
@@ -245,10 +262,15 @@ impl HmacCsrfProtection {
 }
 
 impl CsrfProtection for HmacCsrfProtection {
-    fn generate_cookie(&self, token_value: &[u8; 64], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError> {
+    fn generate_cookie(
+        &self,
+        token_value: &[u8; 64],
+        ttl_seconds: i64,
+    ) -> Result<CsrfCookie, CsrfError> {
         let expires = (Utc::now() + Duration::seconds(ttl_seconds)).timestamp();
         let mut expires_bytes = [0u8; 8];
-        (&mut expires_bytes[..]).write_i64::<BigEndian>(expires)
+        (&mut expires_bytes[..])
+            .write_i64::<BigEndian>(expires)
             .map_err(|_| CsrfError::InternalError)?;
 
         let mut hmac = self.hmac();
@@ -295,8 +317,9 @@ impl CsrfProtection for HmacCsrfProtection {
         }
 
         let mut cur = Cursor::new(&cookie[32..40]);
-        let expires = cur.read_i64::<BigEndian>()
-            .map_err(|_| CsrfError::InternalError)?;
+        let expires = cur.read_i64::<BigEndian>().map_err(
+            |_| CsrfError::InternalError,
+        )?;
         Ok(UnencryptedCsrfCookie::new(expires, cookie[40..].to_vec()))
     }
 
@@ -329,9 +352,7 @@ pub struct AesGcmCsrfProtection {
 impl AesGcmCsrfProtection {
     /// Given an AES256 key, return an `AesGcmCsrfProtection` instance.
     pub fn from_key(aead_key: [u8; 32]) -> Self {
-        AesGcmCsrfProtection {
-            aead_key: aead_key,
-        }
+        AesGcmCsrfProtection { aead_key: aead_key }
     }
 
     fn aead<'a>(&self, nonce: &[u8; 12]) -> AesGcm<'a> {
@@ -340,10 +361,15 @@ impl AesGcmCsrfProtection {
 }
 
 impl CsrfProtection for AesGcmCsrfProtection {
-    fn generate_cookie(&self, token_value: &[u8; 64], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError> {
+    fn generate_cookie(
+        &self,
+        token_value: &[u8; 64],
+        ttl_seconds: i64,
+    ) -> Result<CsrfCookie, CsrfError> {
         let expires = (Utc::now() + Duration::seconds(ttl_seconds)).timestamp();
         let mut expires_bytes = [0u8; 8];
-        (&mut expires_bytes[..]).write_i64::<BigEndian>(expires)
+        (&mut expires_bytes[..])
+            .write_i64::<BigEndian>(expires)
             .map_err(|_| CsrfError::InternalError)?;
 
         let mut nonce = [0; 12];
@@ -407,9 +433,13 @@ impl CsrfProtection for AesGcmCsrfProtection {
         }
 
         let mut cur = Cursor::new(&plaintext[32..40]);
-        let expires = cur.read_i64::<BigEndian>()
-            .map_err(|_| CsrfError::InternalError)?;
-        Ok(UnencryptedCsrfCookie::new(expires, plaintext[40..].to_vec()))
+        let expires = cur.read_i64::<BigEndian>().map_err(
+            |_| CsrfError::InternalError,
+        )?;
+        Ok(UnencryptedCsrfCookie::new(
+            expires,
+            plaintext[40..].to_vec(),
+        ))
     }
 
     fn parse_token(&self, token: &[u8]) -> Result<UnencryptedCsrfToken, CsrfError> {
@@ -441,9 +471,7 @@ pub struct ChaCha20Poly1305CsrfProtection {
 impl ChaCha20Poly1305CsrfProtection {
     /// Given a key, return a `ChaCha20Poly1305CsrfProtection` instance.
     pub fn from_key(aead_key: [u8; 32]) -> Self {
-        ChaCha20Poly1305CsrfProtection {
-            aead_key: aead_key,
-        }
+        ChaCha20Poly1305CsrfProtection { aead_key: aead_key }
     }
 
     fn aead(&self, nonce: &[u8; 8]) -> ChaCha20Poly1305 {
@@ -452,10 +480,15 @@ impl ChaCha20Poly1305CsrfProtection {
 }
 
 impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
-    fn generate_cookie(&self, token_value: &[u8; 64], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError> {
+    fn generate_cookie(
+        &self,
+        token_value: &[u8; 64],
+        ttl_seconds: i64,
+    ) -> Result<CsrfCookie, CsrfError> {
         let expires = (Utc::now() + Duration::seconds(ttl_seconds)).timestamp();
         let mut expires_bytes = [0u8; 8];
-        (&mut expires_bytes[..]).write_i64::<BigEndian>(expires)
+        (&mut expires_bytes[..])
+            .write_i64::<BigEndian>(expires)
             .map_err(|_| CsrfError::InternalError)?;
 
         let mut nonce = [0; 8];
@@ -519,9 +552,13 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
         }
 
         let mut cur = Cursor::new(&plaintext[32..40]);
-        let expires = cur.read_i64::<BigEndian>()
-            .map_err(|_| CsrfError::InternalError)?;
-        Ok(UnencryptedCsrfCookie::new(expires, plaintext[40..].to_vec()))
+        let expires = cur.read_i64::<BigEndian>().map_err(
+            |_| CsrfError::InternalError,
+        )?;
+        Ok(UnencryptedCsrfCookie::new(
+            expires,
+            plaintext[40..].to_vec(),
+        ))
     }
 
     fn parse_token(&self, token: &[u8]) -> Result<UnencryptedCsrfToken, CsrfError> {
@@ -556,15 +593,16 @@ impl MultiCsrfProtection {
     /// Create a new `MultiCsrfProtection` from one current `CsrfProtection` and some `N` previous
     /// instances of `CsrfProtection`.
     pub fn new(current: Box<CsrfProtection>, previous: Vec<Box<CsrfProtection>>) -> Self {
-        Self {
-            current,
-            previous,
-        }
+        Self { current, previous }
     }
 }
 
 impl CsrfProtection for MultiCsrfProtection {
-    fn generate_cookie(&self, token_value: &[u8; 64], ttl_seconds: i64) -> Result<CsrfCookie, CsrfError> {
+    fn generate_cookie(
+        &self,
+        token_value: &[u8; 64],
+        ttl_seconds: i64,
+    ) -> Result<CsrfCookie, CsrfError> {
         self.current.generate_cookie(token_value, ttl_seconds)
     }
 
@@ -629,9 +667,11 @@ mod tests {
                     let protect = $strct::from_key(KEY_32);
                     let (token, cookie) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/cookie pair");
-                    let ref token = BASE64.decode(token.b64_string().as_bytes()).expect("token not base64");
+                    let ref token = BASE64.decode(token.b64_string().as_bytes())
+                        .expect("token not base64");
                     let token = protect.parse_token(&token).expect("token not parsed");
-                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes()).expect("cookie not base64");
+                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes())
+                        .expect("cookie not base64");
                     let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
                     assert!(protect.verify_token_pair(&token, &cookie),
                             "could not verify token/cookie pair");
@@ -644,7 +684,8 @@ mod tests {
                         .expect("couldn't generate token/cookie pair");
                     let cookie_len = cookie.bytes.len();
                     cookie.bytes[cookie_len - 1] ^= 0x01;
-                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes()).expect("cookie not base64");
+                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes())
+                        .expect("cookie not base64");
                     assert!(protect.parse_cookie(&cookie).is_err());
                 }
 
@@ -654,7 +695,8 @@ mod tests {
                     let (_, mut cookie) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/cookie pair");
                     cookie.bytes[0] ^= 0x01;
-                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes()).expect("cookie not base64");
+                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes())
+                        .expect("cookie not base64");
                     assert!(protect.parse_cookie(&cookie).is_err());
                 }
 
@@ -665,7 +707,8 @@ mod tests {
                         .expect("couldn't generate token/token pair");
                     let token_len = token.bytes.len();
                     token.bytes[token_len - 1] ^= 0x01;
-                    let ref token = BASE64.decode(token.b64_string().as_bytes()).expect("token not base64");
+                    let ref token = BASE64.decode(token.b64_string().as_bytes())
+                        .expect("token not base64");
                     assert!(protect.parse_token(&token).is_err());
                 }
 
@@ -675,7 +718,8 @@ mod tests {
                     let (mut token, _) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/token pair");
                     token.bytes[0] ^= 0x01;
-                    let ref token = BASE64.decode(token.b64_string().as_bytes()).expect("token not base64");
+                    let ref token = BASE64.decode(token.b64_string().as_bytes())
+                        .expect("token not base64");
                     assert!(protect.parse_token(&token).is_err());
                 }
 
@@ -687,9 +731,11 @@ mod tests {
                     let (_, cookie) = protect.generate_token_pair(None, 300)
                         .expect("couldn't generate token/token pair");
 
-                    let ref token = BASE64.decode(token.b64_string().as_bytes()).expect("token not base64");
+                    let ref token = BASE64.decode(token.b64_string().as_bytes())
+                        .expect("token not base64");
                     let token = protect.parse_token(&token).expect("token not parsed");
-                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes()).expect("cookie not base64");
+                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes())
+                        .expect("cookie not base64");
                     let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
                     assert!(!protect.verify_token_pair(&token, &cookie),
                             "verified token/cookie pair when failure expected");
@@ -700,9 +746,11 @@ mod tests {
                     let protect = $strct::from_key(KEY_32);
                     let (token, cookie) = protect.generate_token_pair(None, -1)
                         .expect("couldn't generate token/cookie pair");
-                    let ref token = BASE64.decode(token.b64_string().as_bytes()).expect("token not base64");
+                    let ref token = BASE64.decode(token.b64_string().as_bytes())
+                        .expect("token not base64");
                     let token = protect.parse_token(&token).expect("token not parsed");
-                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes()).expect("cookie not base64");
+                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes())
+                        .expect("cookie not base64");
                     let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
                     assert!(!protect.verify_token_pair(&token, &cookie),
                             "verified token/cookie pair when failure expected");
@@ -737,15 +785,17 @@ mod tests {
                         pairs.push(pair);
 
                         for &(ref token, ref cookie) in pairs.iter() {
-                            let ref token = BASE64.decode(token.b64_string().as_bytes()).expect("token not base64");
+                            let ref token = BASE64.decode(token.b64_string().as_bytes())
+                                .expect("token not base64");
                             let token = protect.parse_token(&token).expect("token not parsed");
-                            let ref cookie = BASE64.decode(cookie.b64_string().as_bytes()).expect("cookie not base64");
+                            let ref cookie = BASE64.decode(cookie.b64_string().as_bytes())
+                                .expect("cookie not base64");
                             let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
                             assert!(protect.verify_token_pair(&token, &cookie),
                                     "could not verify token/cookie pair");
                         }
                     }
-                    
+
                     #[test]
                     fn $fn2() {
                         let protect_1 = $strct1::from_key(KEY_32);
@@ -760,15 +810,20 @@ mod tests {
                             .expect("couldn't generate token/cookie pair");
                         pairs.push(pair);
 
-                        let protect = MultiCsrfProtection::new(Box::new(protect_1), vec![Box::new(protect_2)]);
+                        let protect = MultiCsrfProtection::new(
+                            Box::new(protect_1),
+                            vec![Box::new(protect_2)],
+                        );
                         let pair = protect.generate_token_pair(None, 300)
                             .expect("couldn't generate token/cookie pair");
                         pairs.push(pair);
 
                         for &(ref token, ref cookie) in pairs.iter() {
-                            let ref token = BASE64.decode(token.b64_string().as_bytes()).expect("token not base64");
+                            let ref token = BASE64.decode(token.b64_string().as_bytes())
+                                .expect("token not base64");
                             let token = protect.parse_token(&token).expect("token not parsed");
-                            let ref cookie = BASE64.decode(cookie.b64_string().as_bytes()).expect("cookie not base64");
+                            let ref cookie = BASE64.decode(cookie.b64_string().as_bytes())
+                                .expect("cookie not base64");
                             let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
                             assert!(protect.verify_token_pair(&token, &cookie),
                                     "could not verify token/cookie pair");
@@ -778,17 +833,62 @@ mod tests {
             }
         }
 
-        test_cases!(AesGcmCsrfProtection, AesGcmCsrfProtection, aesgcm_then_none, aesgcm_then_aesgcm);
-        test_cases!(ChaCha20Poly1305CsrfProtection, ChaCha20Poly1305CsrfProtection, chacha20poly1305_then_none, chacha20poly1305_then_chacha20poly1305);
-        test_cases!(HmacCsrfProtection, HmacCsrfProtection, hmac_then_none, hmac_then_hmac);
+        test_cases!(
+            AesGcmCsrfProtection,
+            AesGcmCsrfProtection,
+            aesgcm_then_none,
+            aesgcm_then_aesgcm
+        );
+        test_cases!(
+            ChaCha20Poly1305CsrfProtection,
+            ChaCha20Poly1305CsrfProtection,
+            chacha20poly1305_then_none,
+            chacha20poly1305_then_chacha20poly1305
+        );
+        test_cases!(
+            HmacCsrfProtection,
+            HmacCsrfProtection,
+            hmac_then_none,
+            hmac_then_hmac
+        );
 
-        test_cases!(ChaCha20Poly1305CsrfProtection, AesGcmCsrfProtection, chacha20poly1305_then_none, chacha20poly1305_then_aesgcm);
-        test_cases!(HmacCsrfProtection, AesGcmCsrfProtection, hmac_then_none, hmac_then_aesgcm);
+        test_cases!(
+            ChaCha20Poly1305CsrfProtection,
+            AesGcmCsrfProtection,
+            chacha20poly1305_then_none,
+            chacha20poly1305_then_aesgcm
+        );
+        test_cases!(
+            HmacCsrfProtection,
+            AesGcmCsrfProtection,
+            hmac_then_none,
+            hmac_then_aesgcm
+        );
 
-        test_cases!(AesGcmCsrfProtection, ChaCha20Poly1305CsrfProtection, aesgcm_then_none, aesgcm_then_chacha20poly1305);
-        test_cases!(HmacCsrfProtection, ChaCha20Poly1305CsrfProtection, hmac_then_none, hmac_then_chacha20poly1305);
+        test_cases!(
+            AesGcmCsrfProtection,
+            ChaCha20Poly1305CsrfProtection,
+            aesgcm_then_none,
+            aesgcm_then_chacha20poly1305
+        );
+        test_cases!(
+            HmacCsrfProtection,
+            ChaCha20Poly1305CsrfProtection,
+            hmac_then_none,
+            hmac_then_chacha20poly1305
+        );
 
-        test_cases!(AesGcmCsrfProtection, HmacCsrfProtection, aesgcm_then_none, aesgcm_then_hmac);
-        test_cases!(ChaCha20Poly1305CsrfProtection, HmacCsrfProtection, chacha20poly1305_then_none, chacha20poly1305_then_hmac);
+        test_cases!(
+            AesGcmCsrfProtection,
+            HmacCsrfProtection,
+            aesgcm_then_none,
+            aesgcm_then_hmac
+        );
+        test_cases!(
+            ChaCha20Poly1305CsrfProtection,
+            HmacCsrfProtection,
+            chacha20poly1305_then_none,
+            chacha20poly1305_then_hmac
+        );
     }
 }
