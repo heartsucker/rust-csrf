@@ -741,14 +741,14 @@ mod tests {
 
     mod multi {
         macro_rules! test_cases {
-            ($strct1: ident, $strct2: ident, $fn1: ident, $fn2: ident) => {
-                mod $fn2 {
+            ($strct1: ident, $strct2: ident, $name: ident) => {
+                mod $name {
                     use data_encoding::BASE64;
                     use super::super::{KEY_32, KEY2_32};
                     use super::super::super::*;
 
                     #[test]
-                    fn $fn1() {
+                    fn no_previous() {
                         let protect = $strct1::from_key(KEY_32);
                         let mut pairs = vec![];
                         let pair = protect.generate_token_pair(None, 300)
@@ -773,7 +773,7 @@ mod tests {
                     }
 
                     #[test]
-                    fn $fn2() {
+                    fn $name() {
                         let protect_1 = $strct1::from_key(KEY_32);
                         let mut pairs = vec![];
                         let pair = protect_1.generate_token_pair(None, 300)
@@ -812,58 +812,52 @@ mod tests {
         test_cases!(
             AesGcmCsrfProtection,
             AesGcmCsrfProtection,
-            aesgcm_then_none,
             aesgcm_then_aesgcm
         );
+
         test_cases!(
             ChaCha20Poly1305CsrfProtection,
             ChaCha20Poly1305CsrfProtection,
-            chacha20poly1305_then_none,
             chacha20poly1305_then_chacha20poly1305
         );
+
         test_cases!(
             HmacCsrfProtection,
             HmacCsrfProtection,
-            hmac_then_none,
             hmac_then_hmac
         );
 
         test_cases!(
             ChaCha20Poly1305CsrfProtection,
             AesGcmCsrfProtection,
-            chacha20poly1305_then_none,
             chacha20poly1305_then_aesgcm
         );
+
         test_cases!(
             HmacCsrfProtection,
             AesGcmCsrfProtection,
-            hmac_then_none,
             hmac_then_aesgcm
         );
 
         test_cases!(
             AesGcmCsrfProtection,
             ChaCha20Poly1305CsrfProtection,
-            aesgcm_then_none,
             aesgcm_then_chacha20poly1305
         );
         test_cases!(
             HmacCsrfProtection,
             ChaCha20Poly1305CsrfProtection,
-            hmac_then_none,
             hmac_then_chacha20poly1305
         );
 
         test_cases!(
             AesGcmCsrfProtection,
             HmacCsrfProtection,
-            aesgcm_then_none,
             aesgcm_then_hmac
         );
         test_cases!(
             ChaCha20Poly1305CsrfProtection,
             HmacCsrfProtection,
-            chacha20poly1305_then_none,
             chacha20poly1305_then_hmac
         );
     }
