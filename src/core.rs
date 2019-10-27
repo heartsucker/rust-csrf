@@ -42,18 +42,14 @@ pub enum CsrfError {
     ValidationFailure,
 }
 
-impl Error for CsrfError {
-    fn description(&self) -> &str {
-        match *self {
-            CsrfError::InternalError => "CSRF library error",
-            CsrfError::ValidationFailure => "CSRF validation failed",
-        }
-    }
-}
+impl Error for CsrfError {}
 
 impl fmt::Display for CsrfError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self)
+        match *self {
+            CsrfError::InternalError => write!(f, "CSRF library error"),
+            CsrfError::ValidationFailure => write!(f, "CSRF validation failed"),
+        }
     }
 }
 
@@ -585,14 +581,14 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
 /// `1 + N` instances of `CsrfProtection` and uses only the first to generate tokens and cookies.
 /// The `N` remaining instances are used only for parsing.
 pub struct MultiCsrfProtection {
-    current: Box<CsrfProtection>,
-    previous: Vec<Box<CsrfProtection>>,
+    current: Box<dyn CsrfProtection>,
+    previous: Vec<Box<dyn CsrfProtection>>,
 }
 
 impl MultiCsrfProtection {
     /// Create a new `MultiCsrfProtection` from one current `CsrfProtection` and some `N` previous
     /// instances of `CsrfProtection`.
-    pub fn new(current: Box<CsrfProtection>, previous: Vec<Box<CsrfProtection>>) -> Self {
+    pub fn new(current: Box<dyn CsrfProtection>, previous: Vec<Box<dyn CsrfProtection>>) -> Self {
         Self { current, previous }
     }
 }
