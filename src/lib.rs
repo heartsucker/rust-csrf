@@ -52,13 +52,17 @@
 
 #![deny(missing_docs)]
 
+extern crate aead;
+extern crate aes_gcm;
 extern crate byteorder;
+extern crate chacha20poly1305;
 extern crate chrono;
-extern crate crypto;
 extern crate data_encoding;
+extern crate hmac;
 #[macro_use]
 extern crate log;
 extern crate rand;
+extern crate sha2;
 #[cfg(feature = "iron")]
 extern crate typemap;
 
