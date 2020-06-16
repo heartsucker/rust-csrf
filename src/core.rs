@@ -12,7 +12,8 @@ use chrono::prelude::*;
 use chrono::Duration;
 use data_encoding::{BASE64, BASE64URL};
 use hmac::{Hmac, Mac};
-use rand::{Rng, OsRng};
+use rand::RngCore;
+use rand::rngs::OsRng;
 use sha2::Sha256;
 #[cfg(feature = "iron")]
 use typemap;
@@ -209,9 +210,7 @@ pub trait CsrfProtection: Send + Sync {
         // TODO We had to get rid of `ring` because of `gcc` conflicts with `rust-crypto`, and
         // `ring`'s RNG didn't require mutability. Now create a new one per call which is not a
         // great idea.
-        OsRng::new()
-            .map_err(|_| CsrfError::InternalError)?
-            .fill_bytes(buf);
+        OsRng.fill_bytes(buf);
         Ok(())
     }
 
