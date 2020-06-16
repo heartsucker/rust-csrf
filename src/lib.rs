@@ -35,7 +35,7 @@
 //!     // extract them from an incoming request
 //!
 //!     let token_bytes = BASE64.decode(token_str.as_bytes()).expect("token not base64");
-//!     let cookie_bytes= BASE64.decode(cookie_str.as_bytes()).expect("cookie not base64");
+//!     let cookie_bytes = BASE64.decode(cookie_str.as_bytes()).expect("cookie not base64");
 //!
 //!     let parsed_token = protect.parse_token(&token_bytes).expect("token not parsed");
 //!     let parsed_cookie = protect.parse_cookie(&cookie_bytes).expect("cookie not parsed");
@@ -45,6 +45,7 @@
 //! ```
 //!
 //! ## Warning
+//!
 //! CSRF protection is not a substitute for authentication or authorization. It *only* exists to
 //! prevent malicious entities from forcing users to take actions they did not intend. If this is
 //! unclear, please read the [Wikipedia

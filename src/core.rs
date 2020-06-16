@@ -1,23 +1,22 @@
 //! Module containing the core functionality for CSRF protection
 
 use std::error::Error;
-use std::{fmt, str};
 use std::io::Cursor;
+use std::{fmt, str};
 
 use aead::{generic_array::GenericArray, Aead, NewAead};
 use aes_gcm::Aes256Gcm;
-use byteorder::{BigEndian, WriteBytesExt, ReadBytesExt};
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use chacha20poly1305::ChaCha20Poly1305;
 use chrono::prelude::*;
 use chrono::Duration;
 use data_encoding::{BASE64, BASE64URL};
 use hmac::{Hmac, Mac};
-use rand::RngCore;
 use rand::rngs::OsRng;
+use rand::RngCore;
 use sha2::Sha256;
 #[cfg(feature = "iron")]
 use typemap;
-
 
 /// The name of the cookie for the CSRF validation data and signature.
 pub const CSRF_COOKIE_NAME: &'static str = "csrf";
@@ -30,7 +29,6 @@ pub const CSRF_HEADER: &'static str = "X-CSRF-Token";
 
 /// The name of the query parameter for the CSRF token.
 pub const CSRF_QUERY_STRING: &'static str = "csrf-token";
-
 
 /// An `enum` of all CSRF related errors.
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
@@ -54,7 +52,6 @@ impl fmt::Display for CsrfError {
         }
     }
 }
-
 
 /// A signed, encrypted CSRF token that is suitable to be displayed to end users.
 #[derive(Eq, PartialEq, Debug, Clone, Hash)]
@@ -85,7 +82,6 @@ impl CsrfToken {
     }
 }
 
-
 /// A signed, encrypted CSRF cookie that is suitable to be displayed to end users.
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct CsrfCookie {
@@ -110,7 +106,6 @@ impl CsrfCookie {
     }
 }
 
-
 /// Internal represenation of an unencrypted CSRF token. This is not suitable to send to end users.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct UnencryptedCsrfToken {
@@ -134,7 +129,6 @@ impl UnencryptedCsrfToken {
         &self.token
     }
 }
-
 
 /// Internal represenation of an unencrypted CSRF cookie. This is not suitable to send to end users.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -197,8 +191,7 @@ pub trait CsrfProtection: Send + Sync {
         if !not_expired {
             debug!(
                 "Cookie expired. Expiration: {}, Current time: {}",
-                cookie.expires,
-                now
+                cookie.expires, now
             );
         }
 
@@ -239,7 +232,6 @@ pub trait CsrfProtection: Send + Sync {
         }
     }
 }
-
 
 /// Uses HMAC to provide authenticated CSRF tokens and cookies.
 pub struct HmacCsrfProtection {
@@ -311,9 +303,9 @@ impl CsrfProtection for HmacCsrfProtection {
         }
 
         let mut cur = Cursor::new(&cookie[32..40]);
-        let expires = cur.read_i64::<BigEndian>().map_err(
-            |_| CsrfError::InternalError,
-        )?;
+        let expires = cur
+            .read_i64::<BigEndian>()
+            .map_err(|_| CsrfError::InternalError)?;
         Ok(UnencryptedCsrfCookie::new(expires, cookie[40..].to_vec()))
     }
 
@@ -334,7 +326,6 @@ impl CsrfProtection for HmacCsrfProtection {
         Ok(UnencryptedCsrfToken::new(token[32..].to_vec()))
     }
 }
-
 
 /// Uses AES-GCM to provide signed, encrypted CSRF tokens and cookies.
 pub struct AesGcmCsrfProtection {
@@ -427,9 +418,9 @@ impl CsrfProtection for AesGcmCsrfProtection {
         })?;
 
         let mut cur = Cursor::new(&plaintext[32..40]);
-        let expires = cur.read_i64::<BigEndian>().map_err(
-            |_| CsrfError::InternalError,
-        )?;
+        let expires = cur
+            .read_i64::<BigEndian>()
+            .map_err(|_| CsrfError::InternalError)?;
         Ok(UnencryptedCsrfCookie::new(
             expires,
             plaintext[40..].to_vec(),
@@ -456,7 +447,6 @@ impl CsrfProtection for AesGcmCsrfProtection {
         Ok(UnencryptedCsrfToken::new(plaintext[32..].to_vec()))
     }
 }
-
 
 /// Uses ChaCha20Poly1305 to provide signed, encrypted CSRF tokens and cookies.
 pub struct ChaCha20Poly1305CsrfProtection {
@@ -549,9 +539,9 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
         })?;
 
         let mut cur = Cursor::new(&plaintext[32..40]);
-        let expires = cur.read_i64::<BigEndian>().map_err(
-            |_| CsrfError::InternalError,
-        )?;
+        let expires = cur
+            .read_i64::<BigEndian>()
+            .map_err(|_| CsrfError::InternalError)?;
         Ok(UnencryptedCsrfCookie::new(
             expires,
             plaintext[40..].to_vec(),
@@ -644,7 +634,6 @@ impl typemap::Key for CsrfToken {
     type Value = CsrfToken;
 }
 
-
 #[cfg(test)]
 mod tests {
     // TODO write test that ensures encrypted messages don't contain the plaintext
@@ -656,32 +645,39 @@ mod tests {
     macro_rules! test_cases {
         ($strct: ident, $md: ident) => {
             mod $md {
-                use $crate::core::{CsrfProtection, $strct};
-                use data_encoding::BASE64;
                 use super::KEY_32;
+                use data_encoding::BASE64;
+                use $crate::core::{$strct, CsrfProtection};
 
                 #[test]
                 fn verification_succeeds() {
                     let protect = $strct::from_key(KEY_32);
-                    let (token, cookie) = protect.generate_token_pair(None, 300)
+                    let (token, cookie) = protect
+                        .generate_token_pair(None, 300)
                         .expect("couldn't generate token/cookie pair");
-                    let ref token = BASE64.decode(token.b64_string().as_bytes())
+                    let ref token = BASE64
+                        .decode(token.b64_string().as_bytes())
                         .expect("token not base64");
                     let token = protect.parse_token(&token).expect("token not parsed");
-                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes())
+                    let ref cookie = BASE64
+                        .decode(cookie.b64_string().as_bytes())
                         .expect("cookie not base64");
                     let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
-                    assert!(protect.verify_token_pair(&token, &cookie),
-                            "could not verify token/cookie pair");
+                    assert!(
+                        protect.verify_token_pair(&token, &cookie),
+                        "could not verify token/cookie pair"
+                    );
                 }
 
                 #[test]
                 fn modified_cookie_value_fails() {
                     let protect = $strct::from_key(KEY_32);
-                    let (_, mut cookie) = protect.generate_token_pair(None, 300)
+                    let (_, mut cookie) = protect
+                        .generate_token_pair(None, 300)
                         .expect("couldn't generate token/cookie pair");
                     cookie.bytes[0] ^= 0x01;
-                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes())
+                    let ref cookie = BASE64
+                        .decode(cookie.b64_string().as_bytes())
                         .expect("cookie not base64");
                     assert!(protect.parse_cookie(&cookie).is_err());
                 }
@@ -689,10 +685,12 @@ mod tests {
                 #[test]
                 fn modified_token_value_fails() {
                     let protect = $strct::from_key(KEY_32);
-                    let (mut token, _) = protect.generate_token_pair(None, 300)
+                    let (mut token, _) = protect
+                        .generate_token_pair(None, 300)
                         .expect("couldn't generate token/token pair");
                     token.bytes[0] ^= 0x01;
-                    let ref token = BASE64.decode(token.b64_string().as_bytes())
+                    let ref token = BASE64
+                        .decode(token.b64_string().as_bytes())
                         .expect("token not base64");
                     assert!(protect.parse_token(&token).is_err());
                 }
@@ -700,37 +698,48 @@ mod tests {
                 #[test]
                 fn mismatched_cookie_token_fail() {
                     let protect = $strct::from_key(KEY_32);
-                    let (token, _) = protect.generate_token_pair(None, 300)
+                    let (token, _) = protect
+                        .generate_token_pair(None, 300)
                         .expect("couldn't generate token/token pair");
-                    let (_, cookie) = protect.generate_token_pair(None, 300)
+                    let (_, cookie) = protect
+                        .generate_token_pair(None, 300)
                         .expect("couldn't generate token/token pair");
 
-                    let ref token = BASE64.decode(token.b64_string().as_bytes())
+                    let ref token = BASE64
+                        .decode(token.b64_string().as_bytes())
                         .expect("token not base64");
                     let token = protect.parse_token(&token).expect("token not parsed");
-                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes())
+                    let ref cookie = BASE64
+                        .decode(cookie.b64_string().as_bytes())
                         .expect("cookie not base64");
                     let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
-                    assert!(!protect.verify_token_pair(&token, &cookie),
-                            "verified token/cookie pair when failure expected");
+                    assert!(
+                        !protect.verify_token_pair(&token, &cookie),
+                        "verified token/cookie pair when failure expected"
+                    );
                 }
 
                 #[test]
                 fn expired_token_fail() {
                     let protect = $strct::from_key(KEY_32);
-                    let (token, cookie) = protect.generate_token_pair(None, -1)
+                    let (token, cookie) = protect
+                        .generate_token_pair(None, -1)
                         .expect("couldn't generate token/cookie pair");
-                    let ref token = BASE64.decode(token.b64_string().as_bytes())
+                    let ref token = BASE64
+                        .decode(token.b64_string().as_bytes())
                         .expect("token not base64");
                     let token = protect.parse_token(&token).expect("token not parsed");
-                    let ref cookie = BASE64.decode(cookie.b64_string().as_bytes())
+                    let ref cookie = BASE64
+                        .decode(cookie.b64_string().as_bytes())
                         .expect("cookie not base64");
                     let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
-                    assert!(!protect.verify_token_pair(&token, &cookie),
-                            "verified token/cookie pair when failure expected");
+                    assert!(
+                        !protect.verify_token_pair(&token, &cookie),
+                        "verified token/cookie pair when failure expected"
+                    );
                 }
             }
-        }
+        };
     }
 
     test_cases!(AesGcmCsrfProtection, aesgcm);
@@ -741,32 +750,38 @@ mod tests {
         macro_rules! test_cases {
             ($strct1: ident, $strct2: ident, $name: ident) => {
                 mod $name {
-                    use data_encoding::BASE64;
-                    use super::super::{KEY_32, KEY2_32};
                     use super::super::super::*;
+                    use super::super::{KEY2_32, KEY_32};
+                    use data_encoding::BASE64;
 
                     #[test]
                     fn no_previous() {
                         let protect = $strct1::from_key(KEY_32);
                         let mut pairs = vec![];
-                        let pair = protect.generate_token_pair(None, 300)
+                        let pair = protect
+                            .generate_token_pair(None, 300)
                             .expect("couldn't generate token/cookie pair");
                         pairs.push(pair);
 
                         let protect = MultiCsrfProtection::new(Box::new(protect), vec![]);
-                        let pair = protect.generate_token_pair(None, 300)
+                        let pair = protect
+                            .generate_token_pair(None, 300)
                             .expect("couldn't generate token/cookie pair");
                         pairs.push(pair);
 
                         for &(ref token, ref cookie) in pairs.iter() {
-                            let ref token = BASE64.decode(token.b64_string().as_bytes())
+                            let ref token = BASE64
+                                .decode(token.b64_string().as_bytes())
                                 .expect("token not base64");
                             let token = protect.parse_token(&token).expect("token not parsed");
-                            let ref cookie = BASE64.decode(cookie.b64_string().as_bytes())
+                            let ref cookie = BASE64
+                                .decode(cookie.b64_string().as_bytes())
                                 .expect("cookie not base64");
                             let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
-                            assert!(protect.verify_token_pair(&token, &cookie),
-                                    "could not verify token/cookie pair");
+                            assert!(
+                                protect.verify_token_pair(&token, &cookie),
+                                "could not verify token/cookie pair"
+                            );
                         }
                     }
 
@@ -774,13 +789,15 @@ mod tests {
                     fn $name() {
                         let protect_1 = $strct1::from_key(KEY_32);
                         let mut pairs = vec![];
-                        let pair = protect_1.generate_token_pair(None, 300)
+                        let pair = protect_1
+                            .generate_token_pair(None, 300)
                             .expect("couldn't generate token/cookie pair");
                         pairs.push(pair);
 
                         let protect_2 = $strct2::from_key(KEY2_32);
                         let mut pairs = vec![];
-                        let pair = protect_2.generate_token_pair(None, 300)
+                        let pair = protect_2
+                            .generate_token_pair(None, 300)
                             .expect("couldn't generate token/cookie pair");
                         pairs.push(pair);
 
@@ -788,23 +805,28 @@ mod tests {
                             Box::new(protect_1),
                             vec![Box::new(protect_2)],
                         );
-                        let pair = protect.generate_token_pair(None, 300)
+                        let pair = protect
+                            .generate_token_pair(None, 300)
                             .expect("couldn't generate token/cookie pair");
                         pairs.push(pair);
 
                         for &(ref token, ref cookie) in pairs.iter() {
-                            let ref token = BASE64.decode(token.b64_string().as_bytes())
+                            let ref token = BASE64
+                                .decode(token.b64_string().as_bytes())
                                 .expect("token not base64");
                             let token = protect.parse_token(&token).expect("token not parsed");
-                            let ref cookie = BASE64.decode(cookie.b64_string().as_bytes())
+                            let ref cookie = BASE64
+                                .decode(cookie.b64_string().as_bytes())
                                 .expect("cookie not base64");
                             let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
-                            assert!(protect.verify_token_pair(&token, &cookie),
-                                    "could not verify token/cookie pair");
+                            assert!(
+                                protect.verify_token_pair(&token, &cookie),
+                                "could not verify token/cookie pair"
+                            );
                         }
                     }
                 }
-            }
+            };
         }
 
         test_cases!(
@@ -819,11 +841,7 @@ mod tests {
             chacha20poly1305_then_chacha20poly1305
         );
 
-        test_cases!(
-            HmacCsrfProtection,
-            HmacCsrfProtection,
-            hmac_then_hmac
-        );
+        test_cases!(HmacCsrfProtection, HmacCsrfProtection, hmac_then_hmac);
 
         test_cases!(
             ChaCha20Poly1305CsrfProtection,
@@ -831,11 +849,7 @@ mod tests {
             chacha20poly1305_then_aesgcm
         );
 
-        test_cases!(
-            HmacCsrfProtection,
-            AesGcmCsrfProtection,
-            hmac_then_aesgcm
-        );
+        test_cases!(HmacCsrfProtection, AesGcmCsrfProtection, hmac_then_aesgcm);
 
         test_cases!(
             AesGcmCsrfProtection,
@@ -848,11 +862,7 @@ mod tests {
             hmac_then_chacha20poly1305
         );
 
-        test_cases!(
-            AesGcmCsrfProtection,
-            HmacCsrfProtection,
-            aesgcm_then_hmac
-        );
+        test_cases!(AesGcmCsrfProtection, HmacCsrfProtection, aesgcm_then_hmac);
         test_cases!(
             ChaCha20Poly1305CsrfProtection,
             HmacCsrfProtection,

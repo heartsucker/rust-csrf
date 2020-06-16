@@ -8,7 +8,7 @@ extern crate test;
 macro_rules! benchmark {
     ($strct: ident, $md: ident) => {
         mod $md {
-            use csrf::{CsrfProtection, $strct};
+            use csrf::{$strct, CsrfProtection};
             use data_encoding::BASE64;
             use test::Bencher;
 
@@ -30,12 +30,15 @@ macro_rules! benchmark {
                 let mut pairs = Vec::new();
 
                 for _ in 0..10 {
-                    let (token, cookie) = protect.generate_token_pair(Some(TOKEN), 3600)
+                    let (token, cookie) = protect
+                        .generate_token_pair(Some(TOKEN), 3600)
                         .expect("failed to generate token");
-                    let token = BASE64.decode(token.b64_string().as_bytes())
+                    let token = BASE64
+                        .decode(token.b64_string().as_bytes())
                         .expect("token not base64");
                     let token = protect.parse_token(&token).expect("token not parsed");
-                    let cookie = BASE64.decode(cookie.b64_string().as_bytes())
+                    let cookie = BASE64
+                        .decode(cookie.b64_string().as_bytes())
                         .expect("cookie not base64");
                     let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
                     pairs.push((token, cookie));
@@ -54,9 +57,11 @@ macro_rules! benchmark {
                 let mut cookies = Vec::new();
 
                 for _ in 0..10 {
-                    let (_, cookie) = protect.generate_token_pair(Some(TOKEN), 3600)
+                    let (_, cookie) = protect
+                        .generate_token_pair(Some(TOKEN), 3600)
                         .expect("failed to generate cookie");
-                    let cookie = BASE64.decode(cookie.b64_string().as_bytes())
+                    let cookie = BASE64
+                        .decode(cookie.b64_string().as_bytes())
                         .expect("cookie not base64");
                     cookies.push(cookie)
                 }
@@ -74,9 +79,11 @@ macro_rules! benchmark {
                 let mut tokens = Vec::new();
 
                 for _ in 0..10 {
-                    let (token, _) = protect.generate_token_pair(Some(TOKEN), 3600)
+                    let (token, _) = protect
+                        .generate_token_pair(Some(TOKEN), 3600)
                         .expect("failed to generate token");
-                    let token = BASE64.decode(token.b64_string().as_bytes())
+                    let token = BASE64
+                        .decode(token.b64_string().as_bytes())
                         .expect("token not base64");
                     tokens.push(token)
                 }
@@ -94,9 +101,11 @@ macro_rules! benchmark {
                 let mut cookies = Vec::new();
 
                 for _ in 0..10 {
-                    let (_, cookie) = protect.generate_token_pair(Some(TOKEN), 3600)
+                    let (_, cookie) = protect
+                        .generate_token_pair(Some(TOKEN), 3600)
                         .expect("failed to generate cookie");
-                    let mut cookie = BASE64.decode(cookie.b64_string().as_bytes())
+                    let mut cookie = BASE64
+                        .decode(cookie.b64_string().as_bytes())
                         .expect("cookie not base64");
                     let cookie_len = cookie.len();
                     cookie[cookie_len - 1] ^= 0x01;
@@ -116,9 +125,11 @@ macro_rules! benchmark {
                 let mut tokens = Vec::new();
 
                 for _ in 0..10 {
-                    let (token, _) = protect.generate_token_pair(Some(TOKEN), 3600)
+                    let (token, _) = protect
+                        .generate_token_pair(Some(TOKEN), 3600)
                         .expect("failed to generate token");
-                    let mut token = BASE64.decode(token.b64_string().as_bytes())
+                    let mut token = BASE64
+                        .decode(token.b64_string().as_bytes())
                         .expect("token not base64");
                     let token_len = token.len();
                     token[token_len - 1] ^= 0x01;
@@ -138,9 +149,11 @@ macro_rules! benchmark {
                 let mut cookies = Vec::new();
 
                 for _ in 0..10 {
-                    let (_, cookie) = protect.generate_token_pair(Some(TOKEN), 3600)
+                    let (_, cookie) = protect
+                        .generate_token_pair(Some(TOKEN), 3600)
                         .expect("failed to generate cookie");
-                    let mut cookie = BASE64.decode(cookie.b64_string().as_bytes())
+                    let mut cookie = BASE64
+                        .decode(cookie.b64_string().as_bytes())
                         .expect("cookie not base64");
                     cookie[0] ^= 0x01;
                     cookies.push(cookie)
@@ -159,9 +172,11 @@ macro_rules! benchmark {
                 let mut tokens = Vec::new();
 
                 for _ in 0..10 {
-                    let (token, _) = protect.generate_token_pair(Some(TOKEN), 3600)
+                    let (token, _) = protect
+                        .generate_token_pair(Some(TOKEN), 3600)
                         .expect("failed to generate token");
-                    let mut token = BASE64.decode(token.b64_string().as_bytes())
+                    let mut token = BASE64
+                        .decode(token.b64_string().as_bytes())
                         .expect("token not base64");
                     token[0] ^= 0x01;
                     tokens.push(token)
@@ -174,7 +189,7 @@ macro_rules! benchmark {
                 });
             }
         }
-    }
+    };
 }
 
 benchmark!(AesGcmCsrfProtection, aesgcm);
