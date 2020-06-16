@@ -24,15 +24,15 @@ path = "./src/lib.rs"
 iron = [ "typemap" ]
 
 [dependencies]
-aead = "0.2"
-aes-gcm = "0.5"
+aead = "0.3"
+aes-gcm = "0.6"
 byteorder = "1"
-chacha20poly1305 = "^0.4.1"
+chacha20poly1305 = "0.5"
 chrono = "0.4"
 data-encoding = "2"
-generic-array = "0.12"
-hmac = "0.7"
+generic-array = "0.14"
+hmac = "0.8"
 log = "0.4"
 rand = "0.7"
-sha2 = "0.8"
+sha2 = "0.9"
 typemap = { version = "0.3", optional = true }

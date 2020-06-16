@@ -2,7 +2,7 @@
 
 use std::error::Error;
 use std::io::Cursor;
-use std::{fmt, str};
+use std::fmt;
 
 use aead::{generic_array::GenericArray, Aead, NewAead};
 use aes_gcm::Aes256Gcm;
@@ -11,7 +11,7 @@ use chacha20poly1305::ChaCha20Poly1305;
 use chrono::prelude::*;
 use chrono::Duration;
 use data_encoding::{BASE64, BASE64URL};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, Mac, NewMac};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use sha2::Sha256;
@@ -262,10 +262,10 @@ impl CsrfProtection for HmacCsrfProtection {
             .map_err(|_| CsrfError::InternalError)?;
 
         let mut hmac = self.hmac();
-        hmac.input(&expires_bytes);
-        hmac.input(token_value);
-        let mac = hmac.result();
-        let code = mac.code();
+        hmac.update(&expires_bytes);
+        hmac.update(token_value);
+        let mac = hmac.finalize();
+        let code = mac.into_bytes();
 
         let mut transport = [0; 104];
         transport[0..32].copy_from_slice(&code);
@@ -277,9 +277,9 @@ impl CsrfProtection for HmacCsrfProtection {
 
     fn generate_token(&self, token_value: &[u8; 64]) -> Result<CsrfToken, CsrfError> {
         let mut hmac = self.hmac();
-        hmac.input(token_value);
-        let mac = hmac.result();
-        let code = mac.code();
+        hmac.update(token_value);
+        let mac = hmac.finalize();
+        let code = mac.into_bytes();
 
         let mut transport = [0; 96];
         transport[0..32].copy_from_slice(&code);
@@ -295,7 +295,7 @@ impl CsrfProtection for HmacCsrfProtection {
         }
 
         let mut hmac = self.hmac();
-        hmac.input(&cookie[32..]);
+        hmac.update(&cookie[32..]);
 
         if hmac.verify(&cookie[0..32]).is_err() {
             info!("CSRF cookie had bad MAC");
@@ -316,7 +316,7 @@ impl CsrfProtection for HmacCsrfProtection {
         }
 
         let mut hmac = self.hmac();
-        hmac.input(&token[32..]);
+        hmac.update(&token[32..]);
 
         if hmac.verify(&token[0..32]).is_err() {
             info!("CSRF token had bad MAC");
@@ -340,7 +340,7 @@ impl AesGcmCsrfProtection {
 
     fn aead(&self) -> Aes256Gcm {
         let key = GenericArray::clone_from_slice(&self.aead_key);
-        Aes256Gcm::new(key)
+        Aes256Gcm::new(&key)
     }
 }
 
@@ -461,7 +461,7 @@ impl ChaCha20Poly1305CsrfProtection {
 
     fn aead(&self) -> ChaCha20Poly1305 {
         let key = GenericArray::clone_from_slice(&self.aead_key);
-        ChaCha20Poly1305::new(key)
+        ChaCha20Poly1305::new(&key)
     }
 }
 
