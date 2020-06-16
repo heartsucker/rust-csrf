@@ -18,18 +18,6 @@ use sha2::Sha256;
 #[cfg(feature = "iron")]
 use typemap;
 
-/// The name of the cookie for the CSRF validation data and signature.
-pub const CSRF_COOKIE_NAME: &'static str = "csrf";
-
-/// The name of the form field for the CSRF token.
-pub const CSRF_FORM_FIELD: &'static str = "csrf-token";
-
-/// The name of the HTTP header for the CSRF token.
-pub const CSRF_HEADER: &'static str = "X-CSRF-Token";
-
-/// The name of the query parameter for the CSRF token.
-pub const CSRF_QUERY_STRING: &'static str = "csrf-token";
-
 /// An `enum` of all CSRF related errors.
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub enum CsrfError {
