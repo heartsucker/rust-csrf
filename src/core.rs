@@ -233,7 +233,7 @@ impl HmacCsrfProtection {
     }
 
     fn hmac(&self) -> Hmac<Sha256> {
-        Hmac::<Sha256>::new_varkey(&self.hmac_key).expect("HMAC can take key of any size")
+        Hmac::<Sha256>::new_from_slice(&self.hmac_key).expect("HMAC can take key of any size")
     }
 }
 
