@@ -1,6 +1,6 @@
 //! Module containing the core functionality for CSRF protection
 
-use std::{borrow::Cow, error::Error, fmt, io::Cursor, str};
+use std::{borrow::Cow, error::Error, fmt, io::Cursor};
 
 use aead::{generic_array::GenericArray, Aead, Key, KeyInit};
 use aes_gcm::Aes256Gcm;
@@ -13,18 +13,6 @@ use rand::RngCore;
 use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
-
-/// The name of the cookie for the CSRF validation data and signature.
-pub const CSRF_COOKIE_NAME: &str = "csrf";
-
-/// The name of the form field for the CSRF token.
-pub const CSRF_FORM_FIELD: &str = "csrf-token";
-
-/// The name of the HTTP header for the CSRF token.
-pub const CSRF_HEADER: &str = "X-CSRF-Token";
-
-/// The name of the query parameter for the CSRF token.
-pub const CSRF_QUERY_STRING: &str = "csrf-token";
 
 /// An `enum` of all CSRF related errors.
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
