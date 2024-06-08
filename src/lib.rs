@@ -40,7 +40,7 @@
 //!     let parsed_token = protect.parse_token(&token_bytes).expect("token not parsed");
 //!     let parsed_cookie = protect.parse_cookie(&cookie_bytes).expect("cookie not parsed");
 //!
-//!     assert!(protect.verify_token_pair(&parsed_token, &parsed_cookie));
+//!     assert!(protect.verify_token_pair(&parsed_token, &parsed_cookie).is_ok());
 //! }
 //! ```
 //!
@@ -52,9 +52,6 @@
 //! article](https://en.wikipedia.org/wiki/Cross-site_request_forgery).
 
 #![deny(missing_docs)]
-
-#[macro_use]
-extern crate log;
 
 mod core;
 pub use crate::core::*;

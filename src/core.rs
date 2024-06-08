@@ -1,22 +1,30 @@
 //! Module containing the core functionality for CSRF protection
 
-use std::error::Error;
-use std::io::Cursor;
-use std::fmt;
+use std::{borrow::Cow, error::Error, fmt, io::Cursor, str};
 
-use aead::{generic_array::GenericArray, Aead, NewAead};
+use aead::{generic_array::GenericArray, Aead, Key, KeyInit};
 use aes_gcm::Aes256Gcm;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use chacha20poly1305::ChaCha20Poly1305;
-use chrono::prelude::*;
-use chrono::Duration;
+use chrono::{prelude::*, Duration};
 use data_encoding::{BASE64, BASE64URL};
-use hmac::{Hmac, Mac, NewMac};
-use rand::rngs::OsRng;
+use hmac::{Hmac, Mac};
 use rand::RngCore;
 use sha2::Sha256;
-#[cfg(feature = "iron")]
-use typemap;
+
+type HmacSha256 = Hmac<Sha256>;
+
+/// The name of the cookie for the CSRF validation data and signature.
+pub const CSRF_COOKIE_NAME: &str = "csrf";
+
+/// The name of the form field for the CSRF token.
+pub const CSRF_FORM_FIELD: &str = "csrf-token";
+
+/// The name of the HTTP header for the CSRF token.
+pub const CSRF_HEADER: &str = "X-CSRF-Token";
+
+/// The name of the query parameter for the CSRF token.
+pub const CSRF_QUERY_STRING: &str = "csrf-token";
 
 /// An `enum` of all CSRF related errors.
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
@@ -24,19 +32,19 @@ pub enum CsrfError {
     /// There was an internal error.
     InternalError,
     /// There was CSRF token validation failure.
-    ValidationFailure,
+    ValidationFailure(String),
     /// There was a CSRF token encryption failure.
-    EncryptionFailure,
+    EncryptionFailure(String),
 }
 
 impl Error for CsrfError {}
 
 impl fmt::Display for CsrfError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            CsrfError::InternalError => write!(f, "CSRF library error"),
-            CsrfError::ValidationFailure => write!(f, "CSRF validation failed"),
-            CsrfError::EncryptionFailure => write!(f, "CSRF encryption failed"),
+        match self {
+            CsrfError::InternalError => write!(f, "Library error"),
+            CsrfError::ValidationFailure(err) => write!(f, "Validation failed: {err}"),
+            CsrfError::EncryptionFailure(err) => write!(f, "Encryption failed: {err}"),
         }
     }
 }
@@ -51,7 +59,7 @@ impl CsrfToken {
     /// Create a new token from the given bytes.
     pub fn new(bytes: Vec<u8>) -> Self {
         // TODO make this return a Result and check that bytes is long enough
-        CsrfToken { bytes: bytes }
+        CsrfToken { bytes }
     }
 
     /// Retrieve the CSRF token as a base64 encoded string.
@@ -80,7 +88,7 @@ impl CsrfCookie {
     /// Create a new cookie from the given token bytes.
     pub fn new(bytes: Vec<u8>) -> Self {
         // TODO make this return a Result and check that bytes is long enough
-        CsrfCookie { bytes: bytes }
+        CsrfCookie { bytes }
     }
 
     /// Get the base64 value of this cookie.
@@ -103,7 +111,7 @@ pub struct UnencryptedCsrfToken {
 impl UnencryptedCsrfToken {
     /// Create a new unenrypted token.
     pub fn new(token: Vec<u8>) -> Self {
-        UnencryptedCsrfToken { token: token }
+        UnencryptedCsrfToken { token }
     }
 
     /// Retrieve the token value as bytes.
@@ -128,10 +136,7 @@ pub struct UnencryptedCsrfCookie {
 impl UnencryptedCsrfCookie {
     /// Create a new unenrypted cookie.
     pub fn new(expires: i64, token: Vec<u8>) -> Self {
-        UnencryptedCsrfCookie {
-            expires: expires,
-            token: token,
-        }
+        UnencryptedCsrfCookie { expires, token }
     }
 
     /// Retrieve the token value as bytes.
@@ -164,26 +169,24 @@ pub trait CsrfProtection: Send + Sync {
         &self,
         token: &UnencryptedCsrfToken,
         cookie: &UnencryptedCsrfCookie,
-    ) -> bool {
-        let tokens_match = token.token == cookie.token;
-        if !tokens_match {
-            debug!(
+    ) -> Result<(), CsrfError> {
+        if token.token != cookie.token {
+            return Err(CsrfError::ValidationFailure(format!(
                 "Token did not match cookie: T: {:?}, C: {:?}",
                 BASE64.encode(&token.token),
                 BASE64.encode(&cookie.token)
-            );
+            )));
         }
 
         let now = Utc::now().timestamp();
-        let not_expired = cookie.expires > now;
-        if !not_expired {
-            debug!(
+        if cookie.expires <= now {
+            return Err(CsrfError::ValidationFailure(format!(
                 "Cookie expired. Expiration: {}, Current time: {}",
                 cookie.expires, now
-            );
+            )));
         }
 
-        tokens_match && not_expired
+        Ok(())
     }
 
     /// Given a buffer, fill it with random bytes or error if this is not possible.
@@ -191,7 +194,7 @@ pub trait CsrfProtection: Send + Sync {
         // TODO We had to get rid of `ring` because of `gcc` conflicts with `rust-crypto`, and
         // `ring`'s RNG didn't require mutability. Now create a new one per call which is not a
         // great idea.
-        OsRng.fill_bytes(buf);
+        rand::rngs::OsRng.fill_bytes(buf);
         Ok(())
     }
 
@@ -201,23 +204,19 @@ pub trait CsrfProtection: Send + Sync {
         previous_token_value: Option<&[u8; 64]>,
         ttl_seconds: i64,
     ) -> Result<(CsrfToken, CsrfCookie), CsrfError> {
-        let token = match previous_token_value {
-            Some(ref previous) => *previous.clone(),
+        let token: Cow<[u8; 64]> = match previous_token_value {
+            Some(v) => Cow::Borrowed(v),
             None => {
-                debug!("Generating new CSRF token.");
-                let mut token = [0; 64];
-                self.random_bytes(&mut token)?;
-                token
+                let mut new_token = [0; 64];
+                self.random_bytes(&mut new_token)
+                    .expect("Error filling random bytes");
+                Cow::Owned(new_token)
             }
         };
 
-        match (
-            self.generate_token(&token),
-            self.generate_cookie(&token, ttl_seconds),
-        ) {
-            (Ok(t), Ok(c)) => Ok((t, c)),
-            _ => Err(CsrfError::ValidationFailure),
-        }
+        let generated_token = self.generate_token(&token)?;
+        let generated_cookie = self.generate_cookie(&token, ttl_seconds)?;
+        Ok((generated_token, generated_cookie))
     }
 }
 
@@ -229,11 +228,11 @@ pub struct HmacCsrfProtection {
 impl HmacCsrfProtection {
     /// Given an HMAC key, return an `HmacCsrfProtection` instance.
     pub fn from_key(hmac_key: [u8; 32]) -> Self {
-        HmacCsrfProtection { hmac_key: hmac_key }
+        HmacCsrfProtection { hmac_key }
     }
 
-    fn hmac(&self) -> Hmac<Sha256> {
-        Hmac::<Sha256>::new_from_slice(&self.hmac_key).expect("HMAC can take key of any size")
+    fn hmac(&self) -> HmacSha256 {
+        <HmacSha256 as Mac>::new_from_slice(&self.hmac_key).expect("HMAC can take key of any size")
     }
 }
 
@@ -278,17 +277,17 @@ impl CsrfProtection for HmacCsrfProtection {
 
     fn parse_cookie(&self, cookie: &[u8]) -> Result<UnencryptedCsrfCookie, CsrfError> {
         if cookie.len() != 104 {
-            debug!("Cookie wrong size. Not parsed.");
-            return Err(CsrfError::ValidationFailure);
+            return Err(CsrfError::ValidationFailure(format!(
+                "Cookie wrong size. Not parsed. Cookie length {} != 104",
+                cookie.len()
+            )));
         }
 
         let mut hmac = self.hmac();
         hmac.update(&cookie[32..]);
 
-        if hmac.verify(&cookie[0..32]).is_err() {
-            info!("CSRF cookie had bad MAC");
-            return Err(CsrfError::ValidationFailure);
-        }
+        hmac.verify_slice(&cookie[0..32])
+            .map_err(|err| CsrfError::ValidationFailure(format!("Cookie had bad MAC: {err}")))?;
 
         let mut cur = Cursor::new(&cookie[32..40]);
         let expires = cur
@@ -299,17 +298,17 @@ impl CsrfProtection for HmacCsrfProtection {
 
     fn parse_token(&self, token: &[u8]) -> Result<UnencryptedCsrfToken, CsrfError> {
         if token.len() != 96 {
-            debug!("Token too small. Not parsed.");
-            return Err(CsrfError::ValidationFailure);
+            return Err(CsrfError::ValidationFailure(format!(
+                "Token too small. Not parsed. Token length {} != 96",
+                token.len()
+            )));
         }
 
         let mut hmac = self.hmac();
         hmac.update(&token[32..]);
 
-        if hmac.verify(&token[0..32]).is_err() {
-            info!("CSRF token had bad MAC");
-            return Err(CsrfError::ValidationFailure);
-        }
+        hmac.verify_slice(&token[0..32])
+            .map_err(|err| CsrfError::ValidationFailure(format!("Token had bad MAC: {err}")))?;
 
         Ok(UnencryptedCsrfToken::new(token[32..].to_vec()))
     }
@@ -323,12 +322,12 @@ pub struct AesGcmCsrfProtection {
 impl AesGcmCsrfProtection {
     /// Given an AES256 key, return an `AesGcmCsrfProtection` instance.
     pub fn from_key(aead_key: [u8; 32]) -> Self {
-        AesGcmCsrfProtection { aead_key: aead_key }
+        AesGcmCsrfProtection { aead_key }
     }
 
     fn aead(&self) -> Aes256Gcm {
-        let key = GenericArray::clone_from_slice(&self.aead_key);
-        Aes256Gcm::new(&key)
+        let key = Key::<Aes256Gcm>::from_slice(&self.aead_key);
+        Aes256Gcm::new(key)
     }
 }
 
@@ -355,12 +354,12 @@ impl CsrfProtection for AesGcmCsrfProtection {
         let aead = self.aead();
 
         let nonce = GenericArray::from_slice(&nonce);
-        let ciphertext = aead
-            .encrypt(nonce, plaintext.as_ref())
-            .map_err(|_| CsrfError::EncryptionFailure)?;
+        let ciphertext = aead.encrypt(nonce, plaintext.as_ref()).map_err(|err| {
+            CsrfError::EncryptionFailure(format!("Failed to encrypt cookie: {err}"))
+        })?;
 
         let mut transport = [0; 132];
-        transport[0..12].copy_from_slice(&nonce);
+        transport[0..12].copy_from_slice(nonce);
         transport[12..].copy_from_slice(&ciphertext);
 
         Ok(CsrfCookie::new(transport.to_vec()))
@@ -377,12 +376,12 @@ impl CsrfProtection for AesGcmCsrfProtection {
         let aead = self.aead();
 
         let nonce = GenericArray::from_slice(&nonce);
-        let ciphertext = aead
-            .encrypt(nonce, plaintext.as_ref())
-            .map_err(|_| CsrfError::EncryptionFailure)?;
+        let ciphertext = aead.encrypt(nonce, plaintext.as_ref()).map_err(|err| {
+            CsrfError::EncryptionFailure(format!("Failed to encrypt token: {err}"))
+        })?;
 
         let mut transport = [0; 124];
-        transport[0..12].copy_from_slice(&nonce);
+        transport[0..12].copy_from_slice(nonce);
         transport[12..].copy_from_slice(&ciphertext);
 
         Ok(CsrfToken::new(transport.to_vec()))
@@ -390,8 +389,10 @@ impl CsrfProtection for AesGcmCsrfProtection {
 
     fn parse_cookie(&self, cookie: &[u8]) -> Result<UnencryptedCsrfCookie, CsrfError> {
         if cookie.len() != 132 {
-            debug!("Cookie wrong size. Not parsed.");
-            return Err(CsrfError::ValidationFailure);
+            return Err(CsrfError::ValidationFailure(format!(
+                "Cookie wrong size. Not parsed. Cookie length {} != 132",
+                cookie.len()
+            )));
         }
 
         let mut nonce = [0; 12];
@@ -400,9 +401,8 @@ impl CsrfProtection for AesGcmCsrfProtection {
         let aead = self.aead();
 
         let nonce = GenericArray::from_slice(&nonce);
-        let plaintext = aead.decrypt(nonce, cookie[12..].as_ref()).map_err(|_| {
-            info!("Failed to decrypt CSRF cookie");
-            CsrfError::ValidationFailure
+        let plaintext = aead.decrypt(nonce, cookie[12..].as_ref()).map_err(|err| {
+            CsrfError::ValidationFailure(format!("Failed to decrypt cookie: {err}"))
         })?;
 
         let mut cur = Cursor::new(&plaintext[32..40]);
@@ -417,8 +417,10 @@ impl CsrfProtection for AesGcmCsrfProtection {
 
     fn parse_token(&self, token: &[u8]) -> Result<UnencryptedCsrfToken, CsrfError> {
         if token.len() != 124 {
-            debug!("Token too small. Not parsed.");
-            return Err(CsrfError::ValidationFailure);
+            return Err(CsrfError::ValidationFailure(format!(
+                "Token too small. Not parsed. Token length {} != 124",
+                token.len()
+            )));
         }
 
         let mut nonce = [0; 12];
@@ -427,9 +429,8 @@ impl CsrfProtection for AesGcmCsrfProtection {
         let aead = self.aead();
 
         let nonce = GenericArray::from_slice(&nonce);
-        let plaintext = aead.decrypt(nonce, token[12..].as_ref()).map_err(|_| {
-            info!("Failed to decrypt CSRF token");
-            CsrfError::ValidationFailure
+        let plaintext = aead.decrypt(nonce, token[12..].as_ref()).map_err(|err| {
+            CsrfError::ValidationFailure(format!("Failed to decrypt token: {err}"))
         })?;
 
         Ok(UnencryptedCsrfToken::new(plaintext[32..].to_vec()))
@@ -444,12 +445,11 @@ pub struct ChaCha20Poly1305CsrfProtection {
 impl ChaCha20Poly1305CsrfProtection {
     /// Given a key, return a `ChaCha20Poly1305CsrfProtection` instance.
     pub fn from_key(aead_key: [u8; 32]) -> Self {
-        ChaCha20Poly1305CsrfProtection { aead_key: aead_key }
+        ChaCha20Poly1305CsrfProtection { aead_key }
     }
 
     fn aead(&self) -> ChaCha20Poly1305 {
-        let key = GenericArray::clone_from_slice(&self.aead_key);
-        ChaCha20Poly1305::new(&key)
+        ChaCha20Poly1305::new_from_slice(&self.aead_key).unwrap()
     }
 }
 
@@ -476,12 +476,12 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
         let aead = self.aead();
 
         let nonce = GenericArray::from_slice(&nonce);
-        let ciphertext = aead
-            .encrypt(nonce, plaintext.as_ref())
-            .map_err(|_| CsrfError::EncryptionFailure)?;
+        let ciphertext = aead.encrypt(nonce, plaintext.as_ref()).map_err(|err| {
+            CsrfError::EncryptionFailure(format!("Failed to encrypt cookie: {err}"))
+        })?;
 
         let mut transport = [0; 132];
-        transport[0..12].copy_from_slice(&nonce);
+        transport[0..12].copy_from_slice(nonce);
         transport[12..].copy_from_slice(&ciphertext);
 
         Ok(CsrfCookie::new(transport.to_vec()))
@@ -498,12 +498,12 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
         let aead = self.aead();
 
         let nonce = GenericArray::from_slice(&nonce);
-        let ciphertext = aead
-            .encrypt(nonce, plaintext.as_ref())
-            .map_err(|_| CsrfError::EncryptionFailure)?;
+        let ciphertext = aead.encrypt(nonce, plaintext.as_ref()).map_err(|err| {
+            CsrfError::EncryptionFailure(format!("Failed to encrypt token: {err}"))
+        })?;
 
         let mut transport = [0; 124];
-        transport[0..12].copy_from_slice(&nonce);
+        transport[0..12].copy_from_slice(nonce);
         transport[12..].copy_from_slice(&ciphertext);
 
         Ok(CsrfToken::new(transport.to_vec()))
@@ -511,8 +511,10 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
 
     fn parse_cookie(&self, cookie: &[u8]) -> Result<UnencryptedCsrfCookie, CsrfError> {
         if cookie.len() != 132 {
-            debug!("Cookie wrong size. Not parsed.");
-            return Err(CsrfError::ValidationFailure);
+            return Err(CsrfError::ValidationFailure(format!(
+                "Cookie wrong size. Not parsed. Cookie length {} != 132",
+                cookie.len()
+            )));
         }
 
         let mut nonce = [0; 12];
@@ -521,9 +523,8 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
         let aead = self.aead();
 
         let nonce = GenericArray::from_slice(&nonce);
-        let plaintext = aead.decrypt(nonce, cookie[12..].as_ref()).map_err(|_| {
-            info!("Failed to decrypt CSRF cookie");
-            CsrfError::ValidationFailure
+        let plaintext = aead.decrypt(nonce, cookie[12..].as_ref()).map_err(|err| {
+            CsrfError::ValidationFailure(format!("Failed to decrypt cookie: {err}"))
         })?;
 
         let mut cur = Cursor::new(&plaintext[32..40]);
@@ -538,8 +539,10 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
 
     fn parse_token(&self, token: &[u8]) -> Result<UnencryptedCsrfToken, CsrfError> {
         if token.len() != 124 {
-            debug!("Token too small. Not parsed.");
-            return Err(CsrfError::ValidationFailure);
+            return Err(CsrfError::ValidationFailure(format!(
+                "Token too small. Not parsed. Token length {} != 124",
+                token.len()
+            )));
         }
 
         let mut nonce = [0; 12];
@@ -548,9 +551,8 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
         let aead = self.aead();
 
         let nonce = GenericArray::from_slice(&nonce);
-        let plaintext = aead.decrypt(nonce, token[12..].as_ref()).map_err(|_| {
-            info!("Failed to decrypt CSRF token");
-            CsrfError::ValidationFailure
+        let plaintext = aead.decrypt(nonce, token[12..].as_ref()).map_err(|err| {
+            CsrfError::ValidationFailure(format!("Failed to decrypt token: {err}"))
         })?;
 
         Ok(UnencryptedCsrfToken::new(plaintext[32..].to_vec()))
@@ -588,7 +590,7 @@ impl CsrfProtection for MultiCsrfProtection {
 
     fn parse_cookie(&self, cookie: &[u8]) -> Result<UnencryptedCsrfCookie, CsrfError> {
         match self.current.parse_cookie(cookie) {
-            ok @ Ok(_) => return ok,
+            ok @ Ok(_) => ok,
             Err(_) => {
                 for protection in self.previous.iter() {
                     match protection.parse_cookie(cookie) {
@@ -596,14 +598,16 @@ impl CsrfProtection for MultiCsrfProtection {
                         Err(_) => (),
                     }
                 }
+                Err(CsrfError::ValidationFailure(
+                    "Failed to validate the cookie against all provided keys".to_owned(),
+                ))
             }
         }
-        Err(CsrfError::ValidationFailure)
     }
 
     fn parse_token(&self, token: &[u8]) -> Result<UnencryptedCsrfToken, CsrfError> {
         match self.current.parse_token(token) {
-            ok @ Ok(_) => return ok,
+            ok @ Ok(_) => ok,
             Err(_) => {
                 for protection in self.previous.iter() {
                     match protection.parse_token(token) {
@@ -611,9 +615,11 @@ impl CsrfProtection for MultiCsrfProtection {
                         Err(_) => (),
                     }
                 }
+                Err(CsrfError::ValidationFailure(
+                    "Failed to validate the token against all provided keys".to_owned(),
+                ))
             }
         }
-        Err(CsrfError::ValidationFailure)
     }
 }
 
@@ -635,7 +641,7 @@ mod tests {
             mod $md {
                 use super::KEY_32;
                 use data_encoding::BASE64;
-                use $crate::core::{$strct, CsrfProtection};
+                use $crate::{$strct, CsrfProtection};
 
                 #[test]
                 fn verification_succeeds() {
@@ -643,16 +649,16 @@ mod tests {
                     let (token, cookie) = protect
                         .generate_token_pair(None, 300)
                         .expect("couldn't generate token/cookie pair");
-                    let ref token = BASE64
+                    let token = &BASE64
                         .decode(token.b64_string().as_bytes())
                         .expect("token not base64");
                     let token = protect.parse_token(&token).expect("token not parsed");
-                    let ref cookie = BASE64
+                    let cookie = &BASE64
                         .decode(cookie.b64_string().as_bytes())
                         .expect("cookie not base64");
                     let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
                     assert!(
-                        protect.verify_token_pair(&token, &cookie),
+                        protect.verify_token_pair(&token, &cookie).is_ok(),
                         "could not verify token/cookie pair"
                     );
                 }
@@ -664,7 +670,7 @@ mod tests {
                         .generate_token_pair(None, 300)
                         .expect("couldn't generate token/cookie pair");
                     cookie.bytes[0] ^= 0x01;
-                    let ref cookie = BASE64
+                    let cookie = &BASE64
                         .decode(cookie.b64_string().as_bytes())
                         .expect("cookie not base64");
                     assert!(protect.parse_cookie(&cookie).is_err());
@@ -677,7 +683,7 @@ mod tests {
                         .generate_token_pair(None, 300)
                         .expect("couldn't generate token/token pair");
                     token.bytes[0] ^= 0x01;
-                    let ref token = BASE64
+                    let token = &BASE64
                         .decode(token.b64_string().as_bytes())
                         .expect("token not base64");
                     assert!(protect.parse_token(&token).is_err());
@@ -693,16 +699,16 @@ mod tests {
                         .generate_token_pair(None, 300)
                         .expect("couldn't generate token/token pair");
 
-                    let ref token = BASE64
+                    let token = &BASE64
                         .decode(token.b64_string().as_bytes())
                         .expect("token not base64");
                     let token = protect.parse_token(&token).expect("token not parsed");
-                    let ref cookie = BASE64
+                    let cookie = &BASE64
                         .decode(cookie.b64_string().as_bytes())
                         .expect("cookie not base64");
                     let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
                     assert!(
-                        !protect.verify_token_pair(&token, &cookie),
+                        !protect.verify_token_pair(&token, &cookie).is_ok(),
                         "verified token/cookie pair when failure expected"
                     );
                 }
@@ -713,16 +719,16 @@ mod tests {
                     let (token, cookie) = protect
                         .generate_token_pair(None, -1)
                         .expect("couldn't generate token/cookie pair");
-                    let ref token = BASE64
+                    let token = &BASE64
                         .decode(token.b64_string().as_bytes())
                         .expect("token not base64");
                     let token = protect.parse_token(&token).expect("token not parsed");
-                    let ref cookie = BASE64
+                    let cookie = &BASE64
                         .decode(cookie.b64_string().as_bytes())
                         .expect("cookie not base64");
                     let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
                     assert!(
-                        !protect.verify_token_pair(&token, &cookie),
+                        !protect.verify_token_pair(&token, &cookie).is_ok(),
                         "verified token/cookie pair when failure expected"
                     );
                 }
@@ -738,8 +744,7 @@ mod tests {
         macro_rules! test_cases {
             ($strct1: ident, $strct2: ident, $name: ident) => {
                 mod $name {
-                    use super::super::super::*;
-                    use super::super::{KEY2_32, KEY_32};
+                    use super::super::{super::*, KEY2_32, KEY_32};
                     use data_encoding::BASE64;
 
                     #[test]
@@ -758,16 +763,16 @@ mod tests {
                         pairs.push(pair);
 
                         for &(ref token, ref cookie) in pairs.iter() {
-                            let ref token = BASE64
+                            let token = &BASE64
                                 .decode(token.b64_string().as_bytes())
                                 .expect("token not base64");
                             let token = protect.parse_token(&token).expect("token not parsed");
-                            let ref cookie = BASE64
+                            let cookie = &BASE64
                                 .decode(cookie.b64_string().as_bytes())
                                 .expect("cookie not base64");
                             let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
                             assert!(
-                                protect.verify_token_pair(&token, &cookie),
+                                protect.verify_token_pair(&token, &cookie).is_ok(),
                                 "could not verify token/cookie pair"
                             );
                         }
@@ -799,16 +804,16 @@ mod tests {
                         pairs.push(pair);
 
                         for &(ref token, ref cookie) in pairs.iter() {
-                            let ref token = BASE64
+                            let token = &BASE64
                                 .decode(token.b64_string().as_bytes())
                                 .expect("token not base64");
                             let token = protect.parse_token(&token).expect("token not parsed");
-                            let ref cookie = BASE64
+                            let cookie = &BASE64
                                 .decode(cookie.b64_string().as_bytes())
                                 .expect("cookie not base64");
                             let cookie = protect.parse_cookie(&cookie).expect("cookie not parsed");
                             assert!(
-                                protect.verify_token_pair(&token, &cookie),
+                                protect.verify_token_pair(&token, &cookie).is_ok(),
                                 "could not verify token/cookie pair"
                             );
                         }
