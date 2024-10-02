@@ -2,7 +2,7 @@
 
 use std::{borrow::Cow, error::Error, fmt, io::Cursor};
 
-use aead::{generic_array::GenericArray, Aead, Key, KeyInit};
+use aead::{generic_array::GenericArray, Aead, AeadCore, Key, KeyInit};
 use aes_gcm::Aes256Gcm;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use chacha20poly1305::ChaCha20Poly1305;
@@ -210,17 +210,32 @@ pub trait CsrfProtection: Send + Sync {
 
 /// Uses HMAC to provide authenticated CSRF tokens and cookies.
 pub struct HmacCsrfProtection {
-    hmac_key: [u8; 32],
+    hmac: HmacSha256,
 }
 
 impl HmacCsrfProtection {
+    /// Returns n `HmacCsrfProtection` instance with auto generated key.
+    pub fn new() -> Self {
+        HmacCsrfProtection {
+            // Infallible
+            hmac: <HmacSha256 as Mac>::new_from_slice(&HmacSha256::generate_key(
+                &mut rand::rngs::OsRng,
+            ))
+            .unwrap(),
+        }
+    }
     /// Given an HMAC key, return an `HmacCsrfProtection` instance.
     pub fn from_key(hmac_key: [u8; 32]) -> Self {
-        HmacCsrfProtection { hmac_key }
+        HmacCsrfProtection {
+            // Infallible
+            hmac: <HmacSha256 as Mac>::new_from_slice(&hmac_key).unwrap(),
+        }
     }
+}
 
-    fn hmac(&self) -> HmacSha256 {
-        <HmacSha256 as Mac>::new_from_slice(&self.hmac_key).expect("HMAC can take key of any size")
+impl Default for HmacCsrfProtection {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -236,7 +251,7 @@ impl CsrfProtection for HmacCsrfProtection {
             .write_i64::<BigEndian>(expires)
             .map_err(|_| CsrfError::InternalError)?;
 
-        let mut hmac = self.hmac();
+        let mut hmac = self.hmac.clone();
         hmac.update(&expires_bytes);
         hmac.update(token_value);
         let mac = hmac.finalize();
@@ -251,7 +266,7 @@ impl CsrfProtection for HmacCsrfProtection {
     }
 
     fn generate_token(&self, token_value: &[u8; 64]) -> Result<CsrfToken, CsrfError> {
-        let mut hmac = self.hmac();
+        let mut hmac = self.hmac.clone();
         hmac.update(token_value);
         let mac = hmac.finalize();
         let code = mac.into_bytes();
@@ -271,7 +286,7 @@ impl CsrfProtection for HmacCsrfProtection {
             )));
         }
 
-        let mut hmac = self.hmac();
+        let mut hmac = self.hmac.clone();
         hmac.update(&cookie[32..]);
 
         hmac.verify_slice(&cookie[0..32])
@@ -292,7 +307,7 @@ impl CsrfProtection for HmacCsrfProtection {
             )));
         }
 
-        let mut hmac = self.hmac();
+        let mut hmac = self.hmac.clone();
         hmac.update(&token[32..]);
 
         hmac.verify_slice(&token[0..32])
@@ -304,18 +319,33 @@ impl CsrfProtection for HmacCsrfProtection {
 
 /// Uses AES-GCM to provide signed, encrypted CSRF tokens and cookies.
 pub struct AesGcmCsrfProtection {
-    aead_key: [u8; 32],
+    aead: Aes256Gcm,
 }
 
 impl AesGcmCsrfProtection {
+    /// Returns an `AesGcmCsrfProtection` instance with auto generated key.
+    pub fn new() -> Self {
+        AesGcmCsrfProtection {
+            aead: {
+                let key = Aes256Gcm::generate_key(&mut rand::rngs::OsRng);
+                Aes256Gcm::new(&key)
+            },
+        }
+    }
     /// Given an AES256 key, return an `AesGcmCsrfProtection` instance.
     pub fn from_key(aead_key: [u8; 32]) -> Self {
-        AesGcmCsrfProtection { aead_key }
+        AesGcmCsrfProtection {
+            aead: {
+                let key = Key::<Aes256Gcm>::from_slice(&aead_key);
+                Aes256Gcm::new(key)
+            },
+        }
     }
+}
 
-    fn aead(&self) -> Aes256Gcm {
-        let key = Key::<Aes256Gcm>::from_slice(&self.aead_key);
-        Aes256Gcm::new(key)
+impl Default for AesGcmCsrfProtection {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -331,45 +361,43 @@ impl CsrfProtection for AesGcmCsrfProtection {
             .write_i64::<BigEndian>(expires)
             .map_err(|_| CsrfError::InternalError)?;
 
-        let mut nonce = [0; 12];
-        self.random_bytes(&mut nonce)?;
-
         let mut plaintext = [0; 104];
         self.random_bytes(&mut plaintext[0..32])?; // padding
         plaintext[32..40].copy_from_slice(&expires_bytes);
         plaintext[40..].copy_from_slice(token_value);
 
-        let aead = self.aead();
+        let nonce = Aes256Gcm::generate_nonce(&mut rand::rngs::OsRng);
 
-        let nonce = GenericArray::from_slice(&nonce);
-        let ciphertext = aead.encrypt(nonce, plaintext.as_ref()).map_err(|err| {
-            CsrfError::EncryptionFailure(format!("Failed to encrypt cookie: {err}"))
-        })?;
+        let ciphertext = self
+            .aead
+            .encrypt(&nonce, plaintext.as_ref())
+            .map_err(|err| {
+                CsrfError::EncryptionFailure(format!("Failed to encrypt cookie: {err}"))
+            })?;
 
         let mut transport = [0; 132];
-        transport[0..12].copy_from_slice(nonce);
+        transport[0..12].copy_from_slice(&nonce);
         transport[12..].copy_from_slice(&ciphertext);
 
         Ok(CsrfCookie::new(transport.to_vec()))
     }
 
     fn generate_token(&self, token_value: &[u8; 64]) -> Result<CsrfToken, CsrfError> {
-        let mut nonce = [0; 12];
-        self.random_bytes(&mut nonce)?;
-
         let mut plaintext = [0; 96];
         self.random_bytes(&mut plaintext[0..32])?; // padding
         plaintext[32..].copy_from_slice(token_value);
 
-        let aead = self.aead();
+        let nonce = Aes256Gcm::generate_nonce(&mut rand::rngs::OsRng);
 
-        let nonce = GenericArray::from_slice(&nonce);
-        let ciphertext = aead.encrypt(nonce, plaintext.as_ref()).map_err(|err| {
-            CsrfError::EncryptionFailure(format!("Failed to encrypt token: {err}"))
-        })?;
+        let ciphertext = self
+            .aead
+            .encrypt(&nonce, plaintext.as_ref())
+            .map_err(|err| {
+                CsrfError::EncryptionFailure(format!("Failed to encrypt token: {err}"))
+            })?;
 
         let mut transport = [0; 124];
-        transport[0..12].copy_from_slice(nonce);
+        transport[0..12].copy_from_slice(&nonce);
         transport[12..].copy_from_slice(&ciphertext);
 
         Ok(CsrfToken::new(transport.to_vec()))
@@ -383,15 +411,14 @@ impl CsrfProtection for AesGcmCsrfProtection {
             )));
         }
 
-        let mut nonce = [0; 12];
-        nonce.copy_from_slice(&cookie[0..12]);
+        let nonce = GenericArray::from_slice(&cookie[0..12]);
 
-        let aead = self.aead();
-
-        let nonce = GenericArray::from_slice(&nonce);
-        let plaintext = aead.decrypt(nonce, cookie[12..].as_ref()).map_err(|err| {
-            CsrfError::ValidationFailure(format!("Failed to decrypt cookie: {err}"))
-        })?;
+        let plaintext = self
+            .aead
+            .decrypt(nonce, cookie[12..].as_ref())
+            .map_err(|err| {
+                CsrfError::ValidationFailure(format!("Failed to decrypt cookie: {err}"))
+            })?;
 
         let mut cur = Cursor::new(&plaintext[32..40]);
         let expires = cur
@@ -411,15 +438,14 @@ impl CsrfProtection for AesGcmCsrfProtection {
             )));
         }
 
-        let mut nonce = [0; 12];
-        nonce.copy_from_slice(&token[0..12]);
+        let nonce = GenericArray::from_slice(&token[0..12]);
 
-        let aead = self.aead();
-
-        let nonce = GenericArray::from_slice(&nonce);
-        let plaintext = aead.decrypt(nonce, token[12..].as_ref()).map_err(|err| {
-            CsrfError::ValidationFailure(format!("Failed to decrypt token: {err}"))
-        })?;
+        let plaintext = self
+            .aead
+            .decrypt(nonce, token[12..].as_ref())
+            .map_err(|err| {
+                CsrfError::ValidationFailure(format!("Failed to decrypt token: {err}"))
+            })?;
 
         Ok(UnencryptedCsrfToken::new(plaintext[32..].to_vec()))
     }
@@ -427,17 +453,28 @@ impl CsrfProtection for AesGcmCsrfProtection {
 
 /// Uses ChaCha20Poly1305 to provide signed, encrypted CSRF tokens and cookies.
 pub struct ChaCha20Poly1305CsrfProtection {
-    aead_key: [u8; 32],
+    aead: ChaCha20Poly1305,
 }
 
 impl ChaCha20Poly1305CsrfProtection {
+    /// Return a new `ChaCha20Poly1305CsrfProtection` instance with auto generated key.
+    pub fn new() -> Self {
+        ChaCha20Poly1305CsrfProtection {
+            aead: ChaCha20Poly1305::new(&ChaCha20Poly1305::generate_key(&mut rand::rngs::OsRng)),
+        }
+    }
     /// Given a key, return a `ChaCha20Poly1305CsrfProtection` instance.
     pub fn from_key(aead_key: [u8; 32]) -> Self {
-        ChaCha20Poly1305CsrfProtection { aead_key }
+        ChaCha20Poly1305CsrfProtection {
+            // Infallibale
+            aead: ChaCha20Poly1305::new_from_slice(&aead_key).unwrap(),
+        }
     }
+}
 
-    fn aead(&self) -> ChaCha20Poly1305 {
-        ChaCha20Poly1305::new_from_slice(&self.aead_key).unwrap()
+impl Default for ChaCha20Poly1305CsrfProtection {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -453,45 +490,43 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
             .write_i64::<BigEndian>(expires)
             .map_err(|_| CsrfError::InternalError)?;
 
-        let mut nonce = [0; 12];
-        self.random_bytes(&mut nonce)?;
-
         let mut plaintext = [0; 104];
         self.random_bytes(&mut plaintext[0..32])?; // padding
         plaintext[32..40].copy_from_slice(&expires_bytes);
         plaintext[40..].copy_from_slice(token_value);
 
-        let aead = self.aead();
+        let nonce = ChaCha20Poly1305::generate_nonce(&mut rand::rngs::OsRng);
 
-        let nonce = GenericArray::from_slice(&nonce);
-        let ciphertext = aead.encrypt(nonce, plaintext.as_ref()).map_err(|err| {
-            CsrfError::EncryptionFailure(format!("Failed to encrypt cookie: {err}"))
-        })?;
+        let ciphertext = self
+            .aead
+            .encrypt(&nonce, plaintext.as_ref())
+            .map_err(|err| {
+                CsrfError::EncryptionFailure(format!("Failed to encrypt cookie: {err}"))
+            })?;
 
         let mut transport = [0; 132];
-        transport[0..12].copy_from_slice(nonce);
+        transport[0..12].copy_from_slice(&nonce);
         transport[12..].copy_from_slice(&ciphertext);
 
         Ok(CsrfCookie::new(transport.to_vec()))
     }
 
     fn generate_token(&self, token_value: &[u8; 64]) -> Result<CsrfToken, CsrfError> {
-        let mut nonce = [0; 12];
-        self.random_bytes(&mut nonce)?;
-
         let mut plaintext = [0; 96];
         self.random_bytes(&mut plaintext[0..32])?; // padding
         plaintext[32..].copy_from_slice(token_value);
 
-        let aead = self.aead();
+        let nonce = ChaCha20Poly1305::generate_nonce(&mut rand::rngs::OsRng);
 
-        let nonce = GenericArray::from_slice(&nonce);
-        let ciphertext = aead.encrypt(nonce, plaintext.as_ref()).map_err(|err| {
-            CsrfError::EncryptionFailure(format!("Failed to encrypt token: {err}"))
-        })?;
+        let ciphertext = self
+            .aead
+            .encrypt(&nonce, plaintext.as_ref())
+            .map_err(|err| {
+                CsrfError::EncryptionFailure(format!("Failed to encrypt token: {err}"))
+            })?;
 
         let mut transport = [0; 124];
-        transport[0..12].copy_from_slice(nonce);
+        transport[0..12].copy_from_slice(&nonce);
         transport[12..].copy_from_slice(&ciphertext);
 
         Ok(CsrfToken::new(transport.to_vec()))
@@ -505,15 +540,14 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
             )));
         }
 
-        let mut nonce = [0; 12];
-        nonce.copy_from_slice(&cookie[0..12]);
+        let nonce = GenericArray::from_slice(&cookie[0..12]);
 
-        let aead = self.aead();
-
-        let nonce = GenericArray::from_slice(&nonce);
-        let plaintext = aead.decrypt(nonce, cookie[12..].as_ref()).map_err(|err| {
-            CsrfError::ValidationFailure(format!("Failed to decrypt cookie: {err}"))
-        })?;
+        let plaintext = self
+            .aead
+            .decrypt(nonce, cookie[12..].as_ref())
+            .map_err(|err| {
+                CsrfError::ValidationFailure(format!("Failed to decrypt cookie: {err}"))
+            })?;
 
         let mut cur = Cursor::new(&plaintext[32..40]);
         let expires = cur
@@ -533,22 +567,22 @@ impl CsrfProtection for ChaCha20Poly1305CsrfProtection {
             )));
         }
 
-        let mut nonce = [0; 12];
-        nonce.copy_from_slice(&token[0..12]);
+        let nonce = GenericArray::from_slice(&token[0..12]);
 
-        let aead = self.aead();
-
-        let nonce = GenericArray::from_slice(&nonce);
-        let plaintext = aead.decrypt(nonce, token[12..].as_ref()).map_err(|err| {
-            CsrfError::ValidationFailure(format!("Failed to decrypt token: {err}"))
-        })?;
+        let plaintext = self
+            .aead
+            .decrypt(nonce, token[12..].as_ref())
+            .map_err(|err| {
+                CsrfError::ValidationFailure(format!("Failed to decrypt token: {err}"))
+            })?;
 
         Ok(UnencryptedCsrfToken::new(plaintext[32..].to_vec()))
     }
 }
 
-/// This is used when one wants to rotate keys or switch from implementation to another. It accepts
-/// `1 + N` instances of `CsrfProtection` and uses only the first to generate tokens and cookies.
+/// This is used when one wants to rotate keys or switch from implementation to another.
+///
+/// It accepts `1 + N` instances of `CsrfProtection` and uses only the first to generate tokens and cookies.
 /// The `N` remaining instances are used only for parsing.
 pub struct MultiCsrfProtection {
     current: Box<dyn CsrfProtection>,
@@ -581,9 +615,8 @@ impl CsrfProtection for MultiCsrfProtection {
             ok @ Ok(_) => ok,
             Err(_) => {
                 for protection in self.previous.iter() {
-                    match protection.parse_cookie(cookie) {
-                        ok @ Ok(_) => return ok,
-                        Err(_) => (),
+                    if let ok @ Ok(_) = protection.parse_cookie(cookie) {
+                        return ok;
                     }
                 }
                 Err(CsrfError::ValidationFailure(
@@ -598,9 +631,8 @@ impl CsrfProtection for MultiCsrfProtection {
             ok @ Ok(_) => ok,
             Err(_) => {
                 for protection in self.previous.iter() {
-                    match protection.parse_token(token) {
-                        ok @ Ok(_) => return ok,
-                        Err(_) => (),
+                    if let ok @ Ok(_) = protection.parse_token(token) {
+                        return ok;
                     }
                 }
                 Err(CsrfError::ValidationFailure(
