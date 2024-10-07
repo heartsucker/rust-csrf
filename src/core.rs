@@ -209,6 +209,7 @@ pub trait CsrfProtection: Send + Sync {
 }
 
 /// Uses HMAC to provide authenticated CSRF tokens and cookies.
+#[derive(Clone)]
 pub struct HmacCsrfProtection {
     hmac: HmacSha256,
 }
@@ -318,6 +319,7 @@ impl CsrfProtection for HmacCsrfProtection {
 }
 
 /// Uses AES-GCM to provide signed, encrypted CSRF tokens and cookies.
+#[derive(Clone)]
 pub struct AesGcmCsrfProtection {
     aead: Aes256Gcm,
 }
@@ -452,6 +454,7 @@ impl CsrfProtection for AesGcmCsrfProtection {
 }
 
 /// Uses ChaCha20Poly1305 to provide signed, encrypted CSRF tokens and cookies.
+#[derive(Clone)]
 pub struct ChaCha20Poly1305CsrfProtection {
     aead: ChaCha20Poly1305,
 }
