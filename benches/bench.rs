@@ -46,7 +46,7 @@ macro_rules! benchmark {
 
                 b.iter(|| {
                     for &(ref token, ref cookie) in pairs.iter() {
-                        protect.verify_token_pair(&token, &cookie);
+                        protect.verify_token_pair(&token, &cookie).unwrap();
                     }
                 });
             }
