@@ -1,16 +1,16 @@
 [package]
 name = "csrf"
 version = "0.4.1"
-authors = [ "heartsucker <heartsucker@autistici.org>" ]
+edition = "2021"
+authors = ["heartsucker <heartsucker@autistici.org>"]
 description = "CSRF protection primitives"
 homepage = "https://github.com/heartsucker/rust-csrf"
 repository = "https://github.com/heartsucker/rust-csrf"
 documentation = "https://docs.rs/csrf"
 readme = "README.md"
 license = "MIT"
-keywords = [ "csrf", "web", "security", "http" ]
-categories = [ "web-programming", "authentication", "cryptography" ]
-edition = "2018"
+keywords = ["csrf", "web", "security", "http"]
+categories = ["web-programming", "authentication", "cryptography"]
 
 [badges]
 travis-ci = { repository = "heartsucker/rust-csrf", branch = "master" }
@@ -21,18 +21,17 @@ name = "csrf"
 path = "./src/lib.rs"
 
 [features]
-iron = [ "typemap" ]
+iron = ["typemap"]
 
 [dependencies]
-aead = "0.4"
-aes-gcm = "0.9"
+aead = "0.5"
+aes-gcm = "0.10"
 byteorder = "1"
-chacha20poly1305 = "0.8"
+chacha20poly1305 = "0.10"
 chrono = "0.4"
-data-encoding = "2"
-generic-array = "0.14"
-hmac = "0.11"
-log = "0.4"
+data-encoding = "2.0"
+generic-array = "1.0"
+hmac = "0.12"
 rand = "0.8"
-sha2 = "0.9"
+sha2 = "0.10"
 typemap = { version = "0.3", optional = true }
